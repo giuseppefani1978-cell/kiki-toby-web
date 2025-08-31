@@ -1,1 +1,22 @@
-
+[
+  {
+    "id": "pantheon",
+    "title": "Panthéon",
+    "subtitle": "Mémoire & Gloire",
+    "lat": 48.8462,
+    "lng": 2.3460,
+    "category": "narratif",
+    "kiki": "On enferme ici les morts illustres, comme des trophées.",
+    "toby": "Au moins, on s’en souvient. C’est mieux que de les oublier."
+  },
+  {
+    "id": "luxembourg",
+    "title": "Jardin du Luxembourg",
+    "subtitle": "Jeunesse & Jeu",
+    "lat": 48.8468,
+    "lng": 2.3372,
+    "category": "narratif",
+    "kiki": "Les enfants courent comme si demain n’existait pas.",
+    "toby": "La vraie sagesse est parfois une course sans but."
+  }
+]
