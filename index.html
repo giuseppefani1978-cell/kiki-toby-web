@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Kiki & Toby – Promenades parisiennes</title>
+
+    <!-- PWA / iOS -->
+    <link rel="manifest" href="/kiki-toby-web/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <link rel="apple-touch-icon" href="/kiki-toby-web/icons/icon-192.png">
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/kiki-toby-web/sw.js');
+        });
+      }
+    </script>
+  </body>
+</html>
