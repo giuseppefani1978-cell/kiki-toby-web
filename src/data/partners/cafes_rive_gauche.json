@@ -1,0 +1,11 @@
+[
+  {
+    "id": "cafe-sorbonne-01",
+    "name": "Café Sorbonne",
+    "lat": 48.8489,
+    "lng": 2.3430,
+    "qrNamespace": "KT-PARTNER",
+    "perScanCents": 20,
+    "monthlyCapCents": 3000
+  }
+]
