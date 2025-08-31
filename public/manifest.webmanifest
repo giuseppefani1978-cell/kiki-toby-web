@@ -1,0 +1,12 @@
+{
+  "name": "Kiki & Toby – Promenades parisiennes",
+  "short_name": "Kiki&Toby",
+  "start_url": "/kiki-toby-web/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0c2233",
+  "icons": [
+    { "src": "/kiki-toby-web/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/kiki-toby-web/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
