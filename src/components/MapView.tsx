@@ -3,9 +3,8 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import poiData from '../data/poi/05_quartier_latin.json';
 import partners from '../data/partners/cafes_rive_gauche.json';
-import DialogueCard from './DialogueCard';
 
-type POI = typeof poiData[number];
+export type POI = typeof poiData[number];
 
 const iconBlue = new L.Icon({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
@@ -16,12 +15,10 @@ const iconBrown = new L.Icon({
   iconSize: [25,41], iconAnchor:[12,41], popupAnchor:[1,-34]
 });
 
-export default function MapView() {
-  const [focus, setFocus] = useState<POI|null>(null);
+export default function MapView({ onFocus }: { onFocus: (p: POI) => void }) {
   const pois = useMemo(() => poiData, []);
-
-  // Optionnel : centrage sur l’utilisateur (si autorisé)
   const [center, setCenter] = useState<[number, number]>([48.8465, 2.344]);
+
   useEffect(() => {
     if (!('geolocation' in navigator)) return;
     const id = navigator.geolocation.watchPosition(
@@ -33,28 +30,26 @@ export default function MapView() {
   }, []);
 
   return (
-    <>
-      <MapContainer id="map" center={center} zoom={15} preferCanvas touchZoom inertia={false}>
-        <TileLayer
-          attribution='&copy; OpenStreetMap'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        {pois.map(p => (
-          <Marker key={p.id} position={[p.lat, p.lng]} icon={iconBlue}
-                  eventHandlers={{ click: () => setFocus(p) }}>
-            <Popup>{p.title}</Popup>
-          </Marker>
-        ))}
-        {partners.map(pt => (
-          <Marker key={pt.id} position={[pt.lat, pt.lng]} icon={iconBrown}>
-            <Popup>{pt.name} (Partenaire)</Popup>
-          </Marker>
-        ))}
-      </MapContainer>
-
-      {focus && (
-        <DialogueCard kiki={focus.kiki!} toby={focus.toby!} poiId={focus.id} />
-      )}
-    </>
+    <MapContainer id="map" center={center} zoom={15} preferCanvas touchZoom inertia={false}>
+      <TileLayer
+        attribution="&copy; OpenStreetMap"
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+      {pois.map(p => (
+        <Marker
+          key={p.id}
+          position={[p.lat, p.lng]}
+          icon={iconBlue}
+          eventHandlers={{ click: () => onFocus(p) }}
+        >
+          <Popup>{p.title}</Popup>
+        </Marker>
+      ))}
+      {partners.map(pt => (
+        <Marker key={pt.id} position={[pt.lat, pt.lng]} icon={iconBrown}>
+          <Popup>{pt.name} (Partenaire)</Popup>
+        </Marker>
+      ))}
+    </MapContainer>
   );
 }
