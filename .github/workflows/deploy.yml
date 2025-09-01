@@ -18,7 +18,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm ci
+          cache: 'npm'
+      - run: npm install --no-audit --no-fund
       - run: npm run build
       - run: cp dist/index.html dist/404.html
       - uses: actions/upload-pages-artifact@v3
