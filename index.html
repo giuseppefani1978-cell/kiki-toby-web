@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Kiki & Toby – Promenades parisiennes</title>
 
+    <!-- CSS global (chargé côté HTML pour éviter les soucis de résolution) -->
+    <link rel="stylesheet" href="/kiki-toby-web/styles.css" />
+
     <!-- PWA / iOS -->
     <link rel="manifest" href="/kiki-toby-web/manifest.webmanifest" />
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -16,9 +19,16 @@
 
     <script type="module" src="/src/main.tsx"></script>
     <script>
+      // Enregistrement SW avec fallback (absolu pour Pages, relatif si nécessaire)
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/kiki-toby-web/sw.js');
+          const tryRegister = (path) =>
+            navigator.serviceWorker.register(path).catch(() => null);
+
+          // Chemin attendu sur GitHub Pages
+          tryRegister('/kiki-toby-web/sw.js')
+            // Fallback si jamais l’app est servie ailleurs
+            .then(r => r || tryRegister('./sw.js'));
         });
       }
     </script>
