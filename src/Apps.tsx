@@ -1,30 +1,51 @@
-import React, { useState } from 'react';
-import MapView from './components/MapView';
-import QRScanner from './components/QRScanner';
+import React, { useMemo, useState, useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import L from 'leaflet';
+import poiData from '../data/poi/05_quartier_latin.json';
+import partners from '../data/partners/cafes_rive_gauche.json';
 
-export default function App() {
-  const [showScan, setShowScan] = useState(false);
-  const [toast, setToast] = useState<string|null>(null);
+export type POI = typeof poiData[number];
+
+const iconBlue = new L.Icon({
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  iconSize: [25,41], iconAnchor:[12,41], popupAnchor:[1,-34]
+});
+const iconBrown = new L.Icon({
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconSize: [25,41], iconAnchor:[12,41], popupAnchor:[1,-34]
+});
+
+export default function MapView({ onFocus }: { onFocus: (p:POI)=>void }) {
+  const pois = useMemo(() => poiData, []);
+  const [center, setCenter] = useState<[number, number]>([48.8465, 2.344]);
+
+  useEffect(() => {
+    if (!('geolocation' in navigator)) return;
+    const id = navigator.geolocation.watchPosition(
+      (pos) => setCenter([pos.coords.latitude, pos.coords.longitude]),
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+    );
+    return () => navigator.geolocation.clearWatch(id);
+  }, []);
 
   return (
-    <div className="safe">
-      <h2 style={{margin:'8px 12px'}}>Kiki & Toby – Promenades parisiennes</h2>
-
-      <MapView />
-
-      <div className="panel" style={{display:'flex', gap:8, alignItems:'center'}}>
-        <button onClick={() => setShowScan(s => !s)}>
-          {showScan ? 'Fermer scanner' : 'Scanner QR partenaire'}
-        </button>
-        {toast && <span>✅ {toast}</span>}
-      </div>
-
-      {showScan && (
-        <QRScanner onVisit={({partnerId})=>{
-          setToast(`Visite validée chez ${partnerId} — récompense débloquée !`);
-          setShowScan(false);
-        }} />
-      )}
-    </div>
+    <MapContainer id="map" center={center} zoom={15} preferCanvas touchZoom inertia={false}>
+      <TileLayer
+        attribution="&copy; OpenStreetMap"
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+      {pois.map(p => (
+        <Marker key={p.id} position={[p.lat, p.lng]} icon={iconBlue}
+                eventHandlers={{ click: () => onFocus(p) }}>
+          <Popup>{p.title}</Popup>
+        </Marker>
+      ))}
+      {partners.map(pt => (
+        <Marker key={pt.id} position={[pt.lat, pt.lng]} icon={iconBrown}>
+          <Popup>{pt.name} (Partenaire)</Popup>
+        </Marker>
+      ))}
+    </MapContainer>
   );
 }
