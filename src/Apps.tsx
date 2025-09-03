@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import MapView from './components/MapView';
 import QRScanner from './components/QRScanner';
-import './styles.css';
+import '../styles.css';
 
 export default function Apps() {
   const [showScan, setShowScan] = useState(false);
