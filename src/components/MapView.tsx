@@ -16,8 +16,8 @@ const iconBrown = new L.Icon({
 });
 
 export default function MapView({
-  bottomSpace = 140,           // <- NOUVEAU : réserve de la place pour les boutons
-  onFocus,                     // <- devient optionnel
+  bottomSpace = 140,
+  onFocus,
 }: {
   bottomSpace?: number;
   onFocus?: (p: POI) => void;
@@ -35,13 +35,12 @@ export default function MapView({
     return () => navigator.geolocation.clearWatch(id);
   }, []);
 
-  // Hauteur de la carte = 100vh - (titre ~72px + espace bas)
-  const mapHeight = `calc(100vh - ${72 + bottomSpace}px)`;
+  const mapHeight = `calc(100vh - ${72 + bottomSpace}px)`; // ~72px pour le titre/marges
 
   return (
     <MapContainer
       id="map"
-      style={{ height: mapHeight }}   // <- on force la hauteur
+      style={{ height: mapHeight }}
       center={center}
       zoom={15}
       preferCanvas
@@ -52,7 +51,6 @@ export default function MapView({
         attribution="&copy; OpenStreetMap"
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-
       {pois.map(p => (
         <Marker
           key={p.id}
@@ -63,7 +61,6 @@ export default function MapView({
           <Popup>{p.title}</Popup>
         </Marker>
       ))}
-
       {partners.map(pt => (
         <Marker key={pt.id} position={[pt.lat, pt.lng]} icon={iconBrown}>
           <Popup>{pt.name} (Partenaire)</Popup>
