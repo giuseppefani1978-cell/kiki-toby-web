@@ -1,51 +1,45 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import L from 'leaflet';
-import poiData from '../data/poi/05_quartier_latin.json';
-import partners from '../data/partners/cafes_rive_gauche.json';
+import React, { useState } from 'react';
+import MapView from './components/MapView';
+import QRScanner from './components/QRScanner';
+import './styles.css';
 
-export type POI = typeof poiData[number];
+export default function App() {
+  const [showScan, setShowScan] = useState(false);
+  const [toast, setToast] = useState<string|null>(null);
 
-const iconBlue = new L.Icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  iconSize: [25,41], iconAnchor:[12,41], popupAnchor:[1,-34]
-});
-const iconBrown = new L.Icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconSize: [25,41], iconAnchor:[12,41], popupAnchor:[1,-34]
-});
-
-export default function MapView({ onFocus }: { onFocus: (p:POI)=>void }) {
-  const pois = useMemo(() => poiData, []);
-  const [center, setCenter] = useState<[number, number]>([48.8465, 2.344]);
-
-  useEffect(() => {
-    if (!('geolocation' in navigator)) return;
-    const id = navigator.geolocation.watchPosition(
-      (pos) => setCenter([pos.coords.latitude, pos.coords.longitude]),
-      () => {},
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
-    );
-    return () => navigator.geolocation.clearWatch(id);
-  }, []);
+  // Hauteur réservée au panneau bas (boutons + marge).
+  // Quand le scanner est ouvert, on garde le panneau visible (fermer)
+  // mais la caméra est en overlay, donc la carte peut être plus courte.
+  const bottomUI = showScan ? 140 : 140; // même hauteur, le scanner est en overlay
 
   return (
-    <MapContainer id="map" center={center} zoom={15} preferCanvas touchZoom inertia={false}>
-      <TileLayer
-        attribution="&copy; OpenStreetMap"
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
-      {pois.map(p => (
-        <Marker key={p.id} position={[p.lat, p.lng]} icon={iconBlue}
-                eventHandlers={{ click: () => onFocus(p) }}>
-          <Popup>{p.title}</Popup>
-        </Marker>
-      ))}
-      {partners.map(pt => (
-        <Marker key={pt.id} position={[pt.lat, pt.lng]} icon={iconBrown}>
-          <Popup>{pt.name} (Partenaire)</Popup>
-        </Marker>
-      ))}
-    </MapContainer>
+    <div className="safe">
+      <h2 style={{margin:'8px 12px'}}>Kiki & Toby – Promenades parisiennes</h2>
+
+      <MapView bottomSpace={bottomUI} />
+
+      <div className="panel" style={{display:'flex', gap:8, alignItems:'center'}}>
+        <button onClick={() => setShowScan(s => !s)}>
+          {showScan ? 'Fermer scanner' : 'Scanner QR partenaire'}
+        </button>
+        {toast && <span>✅ {toast}</span>}
+      </div>
+
+      {showScan && (
+        <div className="overlay">
+          <div className="overlay-card">
+            <div className="overlay-head">
+              <b>Scanner un QR partenaire</b>
+              <button onClick={() => setShowScan(false)} aria-label="Fermer">✕</button>
+            </div>
+            <QRScanner onVisit={({ partnerId }) => {
+              setToast(`Visite validée chez ${partnerId} — récompense débloquée !`);
+              setShowScan(false);
+            }} />
+            <p className="overlay-hint">Cadrez le QR. La détection est automatique.</p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
