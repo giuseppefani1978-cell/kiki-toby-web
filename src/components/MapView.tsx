@@ -15,7 +15,13 @@ const iconBrown = new L.Icon({
   iconSize: [25,41], iconAnchor:[12,41], popupAnchor:[1,-34]
 });
 
-export default function MapView({ onFocus }: { onFocus: (p: POI) => void }) {
+export default function MapView({
+  bottomSpace = 140,           // <- NOUVEAU : réserve de la place pour les boutons
+  onFocus,                     // <- devient optionnel
+}: {
+  bottomSpace?: number;
+  onFocus?: (p: POI) => void;
+}) {
   const pois = useMemo(() => poiData, []);
   const [center, setCenter] = useState<[number, number]>([48.8465, 2.344]);
 
@@ -29,22 +35,35 @@ export default function MapView({ onFocus }: { onFocus: (p: POI) => void }) {
     return () => navigator.geolocation.clearWatch(id);
   }, []);
 
+  // Hauteur de la carte = 100vh - (titre ~72px + espace bas)
+  const mapHeight = `calc(100vh - ${72 + bottomSpace}px)`;
+
   return (
-    <MapContainer id="map" center={center} zoom={15} preferCanvas touchZoom inertia={false}>
+    <MapContainer
+      id="map"
+      style={{ height: mapHeight }}   // <- on force la hauteur
+      center={center}
+      zoom={15}
+      preferCanvas
+      touchZoom
+      inertia={false}
+    >
       <TileLayer
         attribution="&copy; OpenStreetMap"
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+
       {pois.map(p => (
         <Marker
           key={p.id}
           position={[p.lat, p.lng]}
           icon={iconBlue}
-          eventHandlers={{ click: () => onFocus(p) }}
+          eventHandlers={onFocus ? { click: () => onFocus(p) } : undefined}
         >
           <Popup>{p.title}</Popup>
         </Marker>
       ))}
+
       {partners.map(pt => (
         <Marker key={pt.id} position={[pt.lat, pt.lng]} icon={iconBrown}>
           <Popup>{pt.name} (Partenaire)</Popup>
