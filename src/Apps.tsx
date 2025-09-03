@@ -1,45 +1,57 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import MapView from './components/MapView';
 import QRScanner from './components/QRScanner';
 import './styles.css';
 
-export default function App() {
+export default function Apps() {
   const [showScan, setShowScan] = useState(false);
-  const [toast, setToast] = useState<string|null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
-  // Hauteur réservée au panneau bas (boutons + marge).
-  // Quand le scanner est ouvert, on garde le panneau visible (fermer)
-  // mais la caméra est en overlay, donc la carte peut être plus courte.
-  const bottomUI = showScan ? 140 : 140; // même hauteur, le scanner est en overlay
+  // Empêche le défilement de la page quand l’overlay est ouvert
+  useEffect(() => {
+    document.body.classList.toggle('modal-open', showScan);
+    return () => document.body.classList.remove('modal-open');
+  }, [showScan]);
 
-  return (
-    <div className="safe">
-      <h2 style={{margin:'8px 12px'}}>Kiki & Toby – Promenades parisiennes</h2>
-
-      <MapView bottomSpace={bottomUI} />
-
-      <div className="panel" style={{display:'flex', gap:8, alignItems:'center'}}>
-        <button onClick={() => setShowScan(s => !s)}>
-          {showScan ? 'Fermer scanner' : 'Scanner QR partenaire'}
-        </button>
-        {toast && <span>✅ {toast}</span>}
-      </div>
-
-      {showScan && (
-        <div className="overlay">
+  // Overlay rendu dans <body> pour passer AU-DESSUS de la carte quoi qu’il arrive
+  const overlay = showScan
+    ? createPortal(
+        <div className="overlay" role="dialog" aria-modal="true">
           <div className="overlay-card">
             <div className="overlay-head">
               <b>Scanner un QR partenaire</b>
               <button onClick={() => setShowScan(false)} aria-label="Fermer">✕</button>
             </div>
-            <QRScanner onVisit={({ partnerId }) => {
-              setToast(`Visite validée chez ${partnerId} — récompense débloquée !`);
-              setShowScan(false);
-            }} />
+            <QRScanner
+              onVisit={({ partnerId }) => {
+                setShowScan(false); // ferme l’overlay dès que ça scanne
+                setToast(`Visite validée chez ${partnerId} — récompense débloquée !`);
+                window.setTimeout(() => setToast(null), 3000); // auto-hide
+              }}
+            />
             <p className="overlay-hint">Cadrez le QR. La détection est automatique.</p>
           </div>
-        </div>
-      )}
+        </div>,
+        document.body
+      )
+    : null;
+
+  return (
+    <div className="safe">
+      <h2 style={{ margin: '8px 12px' }}>Kiki & Toby – Promenades parisiennes</h2>
+
+      {/* La carte laisse un espace en bas pour la barre d’actions */}
+      <MapView bottomSpace={140} />
+
+      <div className="panel" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button className="primary" onClick={() => setShowScan(true)}>
+          Scanner QR partenaire
+        </button>
+      </div>
+
+      {overlay}
+      {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
