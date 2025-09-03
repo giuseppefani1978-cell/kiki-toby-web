@@ -1,12 +1,12 @@
 /* Leaflet CSS via CDN (plus simple que l'import module) */
 @import url('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css');
 
-/* Hauteur du panneau bas (modifiable) — utile si tu ne la gères pas en inline */
 :root { --footer-h: 220px; }
 
 html, body, #root { height: 100%; margin: 0; }
 body { background: #f5f6f7; }
 
+/* safe areas iOS */
 .safe {
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
@@ -14,23 +14,11 @@ body { background: #f5f6f7; }
   padding-right: env(safe-area-inset-right);
 }
 
-/* OPTION A (si tu ne donnes PAS de style inline dans MapView) :
+/* OPTION si la hauteur n’est PAS gérée en inline dans MapView
 #map {
   height: calc(100vh - var(--footer-h) - env(safe-area-inset-top) - env(safe-area-inset-bottom));
 }
 */
-
-/* Footer fixe en bas pour les interactions */
-.app-footer {
-  position: fixed;
-  left: 0; right: 0; bottom: 0;
-  height: calc(var(--footer-h) + env(safe-area-inset-bottom));
-  padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
-  background: #fff;
-  border-top: 1px solid #e8eaed;
-  box-shadow: 0 -6px 18px rgba(0,0,0,0.06);
-  z-index: 1000;
-}
 
 .panel { padding: 12px; }
 button { padding: 10px 14px; border-radius: 10px; border: 1px solid #d0d7de; background:#fff; }
@@ -57,6 +45,22 @@ button.primary { background:#0b5fff; color:#fff; border-color:#0b5fff; }
 .overlay-head button { border: 0; background: transparent; font-size: 18px; }
 .overlay-hint { opacity: 0.7; text-align: center; margin-top: 8px; }
 
-/* (Optionnel) Aide pour la vidéo du scanner */
+/* Zone vidéo du scanner */
 .qr-region { width: 100%; height: 320px; }
 .qr-region video { width: 100% !important; height: auto !important; object-fit: cover; }
+
+/* Scroll lock et toast feedback */
+body.modal-open { overflow: hidden; }
+.toast {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  background: #111;
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 10px;
+  z-index: 10000;
+  box-shadow: 0 6px 24px rgba(0,0,0,.25);
+  font-size: 14px;
+}
