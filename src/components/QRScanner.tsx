@@ -1,86 +1,105 @@
 // src/components/QRScanner.tsx
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
 
 function parseQR(raw: string) {
   const parts = raw.trim().split('|');
-  if (parts.length < 3) return null;
-  const [ns, partnerId, ts] = parts;
-  if (ns !== 'KT-PARTNER') return null;
-  return { ns, partnerId, ts: Number(ts) || Date.now() };
+  if (parts.length >= 3 && parts[0] === 'KT-PARTNER') {
+    return { partnerId: parts[1], ts: Number(parts[2]) || Date.now() };
+  }
+  // fallback: accepte n'importe quel QR comme partnerId brut
+  return { partnerId: raw, ts: Date.now() };
 }
 
-// Try to pick the rear camera on phones
 async function pickRearCamera(): Promise<MediaStreamConstraints['video']> {
-  if (!navigator.mediaDevices?.enumerateDevices) {
-    return { facingMode: 'environment' as const };
-  }
+  if (!navigator.mediaDevices?.enumerateDevices) return { facingMode: { ideal: 'environment' } };
   try {
     const devs = await navigator.mediaDevices.enumerateDevices();
     const cams = devs.filter(d => d.kind === 'videoinput');
-    const rear = cams.find(d =>
-      /back|rear|environment/i.test(d.label) || /back|rear|environment/i.test(d.deviceId)
-    );
-    return rear ? { deviceId: { exact: rear.deviceId } } : { facingMode: 'environment' as const };
+    const rear = cams.find(d => /back|rear|environment/i.test(d.label) || /back|rear|environment/i.test(d.deviceId));
+    return rear ? { deviceId: { exact: rear.deviceId } } : { facingMode: { ideal: 'environment' } };
   } catch {
-    return { facingMode: 'environment' as const };
+    return { facingMode: { ideal: 'environment' } };
   }
 }
 
-export default function QRScanner({ onVisit }: { onVisit: (p: { partnerId: string }) => void }) {
-  const boxRef = useRef<HTMLDivElement>(null);
+type Props = { onVisit: (p: { partnerId: string }) => void };
+
+export default function QRScanner({ onVisit }: Props) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [inst, setInst] = useState<Html5Qrcode | null>(null);
+  const stoppedRef = useRef(false);       // évite stop/clear multiples
+  const handledOnceRef = useRef(false);   // évite callback multiple
 
   useEffect(() => {
-    if (!boxRef.current) return;
+    if (!hostRef.current) return;
 
-    // Use the visible container itself as the scan region
-    const regionId = 'qr-region-' + Math.random().toString(36).slice(2);
-    boxRef.current.id = regionId;
+    const id = 'qr-' + Math.random().toString(36).slice(2);
+    const region = document.createElement('div');
+    region.id = id;
+    region.className = 'qr-region';
+    hostRef.current.appendChild(region);
 
-    const scanner = new Html5Qrcode(regionId);
+    const qr = new Html5Qrcode(id, /*verbose*/ false);
+    setInst(qr);
 
     (async () => {
       try {
-        const videoConstraints = await pickRearCamera();
-        await scanner.start(
-          videoConstraints,
-          { fps: 10, qrbox: 250 },
-          (decoded: string) => {
+        const video = await pickRearCamera();
+        const box = Math.min(Math.floor(window.innerWidth * 0.8), 360); // cadre plus grand
+
+        await qr.start(
+          video,
+          { fps: 12, qrbox: { width: box, height: box } },
+          async (decoded: string) => {
+            if (handledOnceRef.current) return;
+            handledOnceRef.current = true;
+
+            // stop/clear une seule fois, et séquencé
+            try {
+              if (!stoppedRef.current) {
+                stoppedRef.current = true;
+                await qr.stop();
+                await qr.clear();
+              }
+            } catch {/* ignore */}
+
             const payload = parseQR(decoded);
-            if (payload) {
-              onVisit({ partnerId: payload.partnerId });
-              scanner.stop().then(() => scanner.clear());
-            }
+            if (payload) onVisit({ partnerId: payload.partnerId });
           },
           () => {}
         );
       } catch (e) {
-        console.error('QR start error', e);
+        console.error('[QR] start error', e);
       }
     })();
 
+    // cleanup robuste
     return () => {
-      scanner.stop().catch(() => {}).finally(() => {
-        scanner.clear().catch(() => {});
-      });
+      (async () => {
+        try {
+          if (!stoppedRef.current && inst) {
+            stoppedRef.current = true;
+            await inst.stop();
+            await inst.clear();
+          }
+        } catch {/* ignore */}
+      })();
     };
-  }, [onVisit]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div
-      ref={boxRef}
+      ref={hostRef}
+      className="qr-region"
       style={{
-        width: '100%',
-        height: 320,
-        background: '#000',
-        borderRadius: 8,
-        overflow: 'hidden',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center'
+        width: '100%', maxWidth: 680, aspectRatio: '1 / 1',
+        background: '#000', borderRadius: 8, overflow: 'hidden',
+        display: 'flex', alignItems: 'center', justifyContent: 'center'
       }}
     >
-      <p style={{ color: '#fff', opacity: 0.7, fontSize: 14 }}>Chargement de la caméra…</p>
+      <p style={{ color:'#fff', opacity:.7, fontSize:14 }}>Chargement de la caméra…</p>
     </div>
   );
 }
