@@ -28,13 +28,6 @@ async function chooseRearConstraint(): Promise<MediaStreamConstraints['video']> 
   }
 }
 
-/** Demande la permission AVANT de lancer html5-qrcode (iOS aime bien). */
-async function preflightPermission(video: MediaStreamConstraints['video']) {
-  const stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
-  // on libère immédiatement, html5-qrcode rouvrira sa propre capture
-  stream.getTracks().forEach(t => t.stop());
-}
-
 export default function QRScanner({ onVisit }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -53,16 +46,15 @@ export default function QRScanner({ onVisit }: Props) {
     (async () => {
       try {
         setErr(null);
+
         // 1) Choix contrainte arrière si possible
-        let video = await chooseRearConstraint();
+        const video = await chooseRearConstraint();
 
-        // 2) Pré-demande de permission (déclenche la popup iOS)
-        await preflightPermission(video);
+        // ⚠️ On NE fait plus de "pré-permission" qui ouvrait/fermait instantanément la caméra
+        // (c’est la cause fréquente de l’écran blanc sur iOS). On laisse html5-qrcode gérer.
 
-        // 3) Taille du cadre (plus grand)
         const box = Math.min(Math.floor(window.innerWidth * 0.86), 420);
 
-        // 4) Start
         await qr.start(
           video,
           { fps: 12, qrbox: { width: box, height: box } },
@@ -77,13 +69,13 @@ export default function QRScanner({ onVisit }: Props) {
               }
             } finally {
               const payload = parseQR(decoded);
-              onVisit({ partnerId: payload.partnerId });
+              onVisit({ partnerId: payload.partnerId }); // Apps ferme l’overlay + affiche le toast
             }
           },
           () => {}
         );
       } catch (e) {
-        // tentative fallback : caméra frontale
+        // Fallback caméra frontale (au cas où)
         try {
           const box = Math.min(Math.floor(window.innerWidth * 0.86), 420);
           await qr.start(
@@ -132,7 +124,7 @@ export default function QRScanner({ onVisit }: Props) {
       style={{
         width: '100%',
         maxWidth: 680,
-        aspectRatio: '4 / 3',     // ratio classique caméra
+        aspectRatio: '4 / 3',
         background: '#000',
         borderRadius: 12,
         overflow: 'hidden',
