@@ -66,21 +66,22 @@ export default function Apps() {
       <h2 style={{ margin: '8px 12px' }}>Kiki & Toby – Promenades parisiennes</h2>
 
       {/* Carte : on remonte le POI cliqué via onFocus */}
-      <MapView bottomSpace={160} onFocus={setFocus} />
-
-      {/* HUD de dialogue (avatars + bulles). 
-         ⚠️ Si DialogueOverlay utilise useMap(), rends-le DANS MapView (via props), 
-         sinon garde comme ceci si ton DialogueOverlay n’emploie pas useMap(). */}
-      {focus && (
-        <DialogueOverlay
-          poi={focus}
-          onClose={() => {
-            setFocus(null);
-            setToast('Choix enregistré ✅');
-            window.setTimeout(() => setToast(null), 2000);
-          }}
-        />
-      )}
+      <MapView
+  bottomSpace={160}
+  onFocus={setFocus}
+  overlay={
+    focus ? (
+      <DialogueOverlay
+        poi={focus}
+        onClose={() => {
+          setFocus(null);
+          setToast('Choix enregistré ✅');
+          window.setTimeout(() => setToast(null), 2000);
+        }}
+      />
+    ) : null
+  }
+/>
 
       {/* Barre d’actions */}
       <div className="panel" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
