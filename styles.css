@@ -64,3 +64,77 @@ body.modal-open { overflow: hidden; }
   box-shadow: 0 6px 24px rgba(0,0,0,.25);
   font-size: 14px;
 }
+/* couche au-dessus de la carte (comme un HUD) */
+.map-overlay {
+  position: absolute; inset: 0;
+  pointer-events: none;        /* laisse la carte cliquable sauf dans les bulles */
+  z-index: 4000;               /* au-dessus des tuiles/markers Leaflet */
+}
+
+/* conteneur des bulles + avatars */
+.bubble-wrap {
+  position: absolute;
+  width: 260px;
+  pointer-events: auto;        /* réactive les clics dans la zone */
+}
+
+.avatars {
+  display: flex; gap: 8px; align-items: center; margin-bottom: 8px;
+}
+.avatar {
+  width: 40px; height: 40px; border-radius: 50%;
+  background: #fff; display:flex; align-items:center; justify-content:center;
+  box-shadow: 0 6px 16px rgba(0,0,0,.15);
+  overflow: hidden;
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+/* bulles BD */
+.speech {
+  position: relative;
+  background: #fff;
+  padding: 10px 12px;
+  border-radius: 14px;
+  box-shadow: 0 10px 24px rgba(0,0,0,.18);
+  margin-bottom: 10px;
+  border: 2px solid #222;
+}
+.speech:after {
+  content: '';
+  position: absolute;
+  left: 18px; bottom: -10px;
+  border-width: 10px 10px 0 10px;
+  border-style: solid;
+  border-color: #222 transparent transparent transparent; /* bord du triangle */
+}
+.speech:before {
+  content: '';
+  position: absolute;
+  left: 18px; bottom: -8px;
+  border-width: 10px 10px 0 10px;
+  border-style: solid;
+  border-color: #fff transparent transparent transparent; /* fond du triangle */
+}
+
+/* style alternatif Kiki/Toby (touche de couleur légère) */
+.speech-kiki { border-color: #1e1e1e; }
+.speech-toby { border-color: #1e1e1e; }
+
+.speech-text { margin-bottom: 8px; }
+
+.chip {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #0b5fff; background:#0b5fff; color:#fff;
+  font-size: 13px;
+}
+
+/* bouton de fermeture */
+.close-x {
+  position: absolute;
+  top: -8px; right: -8px;
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 0; background: #111; color: #fff;
+  box-shadow: 0 6px 18px rgba(0,0,0,.25);
+}
