@@ -1,12 +1,12 @@
 // src/Apps.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import MapView, { POI } from './components/MapView';
 import QRScanner from './components/QRScanner';
 import DialogueOverlay from './components/DialogueOverlay';
 import AlbumPanel from './components/AlbumPanel';
-import MiniGameOverlay from './components/MiniGameOverlay'; // ← AJOUT
+import MiniGameOverlay from './components/MiniGameOverlay';
 
 import { game, loadGame } from './store/game';
 import '../styles.css';
@@ -18,13 +18,17 @@ export default function Apps() {
   const [toast, setToast] = useState<string | null>(null);
   const [focus, setFocus] = useState<POI | null>(null);
 
-  // --- Mini-jeu ---
+  // Mini-jeu
   const [showGame, setShowGame] = useState<null | { character: 'kiki' | 'toby'; title: string }>(null);
 
-  // force re-render quand le store "game" change (via CustomEvent)
+  // pour restaurer le focus après fermeture d’un overlay (accessibilité)
+  const lastFocusRef = useRef<HTMLElement | null>(null);
+  const hasAnyOverlay = showScan || showAlbum || !!showGame;
+
+  // re-render quand le store "game" change
   const [, force] = useState(0);
 
-  // Charger l'état persistant + s'abonner aux updates de l'album
+  // Charger l'état persistant + s'abonner aux updates
   useEffect(() => {
     loadGame();
     const onUpd = () => force(x => x + 1);
@@ -32,61 +36,99 @@ export default function Apps() {
     return () => window.removeEventListener('kt-game-update', onUpd as any);
   }, []);
 
-  // Empêche le scroll quand un overlay plein écran est ouvert
+  // Empêche le scroll/zoom de la page quand un overlay plein écran est ouvert (iOS-friendly)
   useEffect(() => {
-    const modalOpen = showScan || !!showGame;
-    document.body.classList.toggle('modal-open', modalOpen);
-    return () => document.body.classList.remove('modal-open');
-  }, [showScan, showGame]);
+    const body = document.body;
+    body.classList.toggle('modal-open', hasAnyOverlay);
+
+    // bloque les gestes tactiles du fond (notamment iOS)
+    const prevent = (e: TouchEvent) => {
+      if (hasAnyOverlay) e.preventDefault();
+    };
+    document.addEventListener('touchmove', prevent, { passive: false });
+    return () => {
+      body.classList.remove('modal-open');
+      document.removeEventListener('touchmove', prevent);
+    };
+  }, [hasAnyOverlay]);
+
+  // Sauve / restaure le focus autour des overlays
+  useEffect(() => {
+    if (hasAnyOverlay) {
+      lastFocusRef.current = (document.activeElement as HTMLElement) || null;
+    } else if (lastFocusRef.current) {
+      lastFocusRef.current.focus?.();
+      lastFocusRef.current = null;
+    }
+  }, [hasAnyOverlay]);
 
   // --- Overlays portés dans <body> ---
-  const scannerOverlay = showScan
-    ? createPortal(
-        <div className="overlay" role="dialog" aria-modal="true">
-          <div className="overlay-card">
-            <div className="overlay-head">
-              <b>Scanner un QR partenaire</b>
-              <button onClick={() => setShowScan(false)} aria-label="Fermer">✕</button>
-            </div>
-            <QRScanner
-              onVisit={({ partnerId }) => {
-                setShowScan(false);
-                setToast(`Visite validée chez ${partnerId} — récompense débloquée !`);
-                window.setTimeout(() => setToast(null), 3000);
-              }}
-            />
-            <p className="overlay-hint">Cadrez le QR. La détection est automatique.</p>
+  const scannerOverlay = useMemo(() => {
+    if (!showScan) return null;
+    return createPortal(
+      <div
+        className="overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Scanner un QR partenaire"
+        onClick={(e) => {
+          // évite de fermer si on clique dans la zone sombre (on ferme uniquement via le bouton ✕)
+          e.stopPropagation();
+        }}
+      >
+        <div className="overlay-card" onClick={(e) => e.stopPropagation()}>
+          <div className="overlay-head">
+            <b>Scanner un QR partenaire</b>
+            <button type="button" onClick={() => setShowScan(false)} aria-label="Fermer">✕</button>
           </div>
-        </div>,
-        document.body
-      )
-    : null;
 
-  const albumOverlay = showAlbum
-    ? createPortal(<AlbumPanel onClose={() => setShowAlbum(false)} />, document.body)
-    : null;
+          {/* Le QRScanner gère la permission et appelle onVisit au succès */}
+          <QRScanner
+            onVisit={({ partnerId }) => {
+              // On garde l’overlay visible jusqu’au callback, puis on le ferme proprement
+              setShowScan(false);
+              setToast(`Visite validée chez ${partnerId} — récompense débloquée !`);
+              window.setTimeout(() => setToast(null), 3000);
+            }}
+          />
 
-  const gameOverlay = showGame
-    ? createPortal(
-        <MiniGameOverlay
-          character={showGame.character}
-          title={showGame.title}
-          onClose={() => setShowGame(null)}
-          onResult={(r) => {
-            setShowGame(null);
-            setToast(r.won ? `🏁 Bravo ! Score ${r.score}` : `💥 Raté… Score ${r.score}`);
-            window.setTimeout(() => setToast(null), 3000);
-          }}
-        />,
-        document.body
-      )
-    : null;
+          <p className="overlay-hint">Cadrez le QR. La détection est automatique.</p>
+        </div>
+      </div>,
+      document.body
+    );
+  }, [showScan]);
+
+  const albumOverlay = useMemo(() => {
+    if (!showAlbum) return null;
+    return createPortal(
+      <AlbumPanel onClose={() => setShowAlbum(false)} />,
+      document.body
+    );
+  }, [showAlbum]);
+
+  const gameOverlay = useMemo(() => {
+    if (!showGame) return null;
+    return createPortal(
+      <MiniGameOverlay
+        character={showGame.character}
+        title={showGame.title}
+        onClose={() => setShowGame(null)}
+        onResult={(r) => {
+          setShowGame(null);
+          setToast(r.won ? `🏁 Bravo ! Score ${r.score}` : `💥 Raté… Score ${r.score}`);
+          window.setTimeout(() => setToast(null), 3000);
+        }}
+      />,
+      document.body
+    );
+  }, [showGame]);
 
   return (
-    <div className="safe" style={{ position: 'relative' }}>
+    <div className="safe" style={{ position: 'relative' }} aria-hidden={hasAnyOverlay}>
       <h2 style={{ margin: '8px 12px' }}>Kiki & Toby – Promenades parisiennes</h2>
 
-      {/* Carte : on remonte le POI cliqué via onFocus, et on passe l’overlay de dialogue à MapView */}
+      {/* La carte reçoit un overlay léger (bulles) rendu au-dessus du <MapContainer> */}
       <MapView
         bottomSpace={160}
         onFocus={setFocus}
@@ -99,7 +141,7 @@ export default function Apps() {
                 setToast('Choix enregistré ✅');
                 window.setTimeout(() => setToast(null), 2000);
 
-                // Ex : lancer un mini-niveau juste après un choix
+                // Exemple: lancer un mini-jeu juste après un choix
                 // setShowGame({ character: 'kiki', title: `${focus.title} — Run` });
               }}
             />
@@ -109,16 +151,16 @@ export default function Apps() {
 
       {/* Barre d’actions */}
       <div className="panel" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <button className="primary" onClick={() => setShowScan(true)}>
+        <button type="button" className="primary" onClick={(e) => { e.currentTarget.blur(); setShowScan(true); }}>
           Scanner QR partenaire
         </button>
 
-        <button onClick={() => setShowAlbum(true)}>
+        <button type="button" onClick={() => setShowAlbum(true)}>
           Album <span className="badge">{game.moustaches + game.pattes}</span>
         </button>
 
-        {/* Bouton de test pour afficher le mini-jeu tout de suite */}
-        <button onClick={() => setShowGame({ character: 'kiki', title: 'Mini-niveau (démo)' })}>
+        {/* Bouton de test pour lancer le mini-jeu immédiatement */}
+        <button type="button" onClick={() => setShowGame({ character: 'kiki', title: 'Mini-jeu (démo)' })}>
           Mini-jeu (démo)
         </button>
       </div>
