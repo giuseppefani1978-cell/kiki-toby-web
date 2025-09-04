@@ -4,8 +4,9 @@ import { createPortal } from 'react-dom';
 
 import MapView, { POI } from './components/MapView';
 import QRScanner from './components/QRScanner';
-import DialogueOverlay from './components/DialogueOverlay'; // si absent, commente cette ligne
+import DialogueOverlay from './components/DialogueOverlay';
 import AlbumPanel from './components/AlbumPanel';
+import MiniGameOverlay from './components/MiniGameOverlay'; // ← AJOUT
 
 import { game, loadGame } from './store/game';
 import '../styles.css';
@@ -16,6 +17,9 @@ export default function Apps() {
   const [showAlbum, setShowAlbum] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [focus, setFocus] = useState<POI | null>(null);
+
+  // --- Mini-jeu ---
+  const [showGame, setShowGame] = useState<null | { character: 'kiki' | 'toby'; title: string }>(null);
 
   // force re-render quand le store "game" change (via CustomEvent)
   const [, force] = useState(0);
@@ -28,11 +32,12 @@ export default function Apps() {
     return () => window.removeEventListener('kt-game-update', onUpd as any);
   }, []);
 
-  // Empêche le scroll uniquement quand le scanner est ouvert
+  // Empêche le scroll quand un overlay plein écran est ouvert
   useEffect(() => {
-    document.body.classList.toggle('modal-open', showScan);
+    const modalOpen = showScan || !!showGame;
+    document.body.classList.toggle('modal-open', modalOpen);
     return () => document.body.classList.remove('modal-open');
-  }, [showScan]);
+  }, [showScan, showGame]);
 
   // --- Overlays portés dans <body> ---
   const scannerOverlay = showScan
@@ -61,27 +66,46 @@ export default function Apps() {
     ? createPortal(<AlbumPanel onClose={() => setShowAlbum(false)} />, document.body)
     : null;
 
+  const gameOverlay = showGame
+    ? createPortal(
+        <MiniGameOverlay
+          character={showGame.character}
+          title={showGame.title}
+          onClose={() => setShowGame(null)}
+          onResult={(r) => {
+            setShowGame(null);
+            setToast(r.won ? `🏁 Bravo ! Score ${r.score}` : `💥 Raté… Score ${r.score}`);
+            window.setTimeout(() => setToast(null), 3000);
+          }}
+        />,
+        document.body
+      )
+    : null;
+
   return (
     <div className="safe" style={{ position: 'relative' }}>
       <h2 style={{ margin: '8px 12px' }}>Kiki & Toby – Promenades parisiennes</h2>
 
-      {/* Carte : on remonte le POI cliqué via onFocus */}
+      {/* Carte : on remonte le POI cliqué via onFocus, et on passe l’overlay de dialogue à MapView */}
       <MapView
-  bottomSpace={160}
-  onFocus={setFocus}
-  overlay={
-    focus ? (
-      <DialogueOverlay
-        poi={focus}
-        onClose={() => {
-          setFocus(null);
-          setToast('Choix enregistré ✅');
-          window.setTimeout(() => setToast(null), 2000);
-        }}
+        bottomSpace={160}
+        onFocus={setFocus}
+        overlay={
+          focus ? (
+            <DialogueOverlay
+              poi={focus}
+              onClose={() => {
+                setFocus(null);
+                setToast('Choix enregistré ✅');
+                window.setTimeout(() => setToast(null), 2000);
+
+                // Ex : lancer un mini-niveau juste après un choix
+                // setShowGame({ character: 'kiki', title: `${focus.title} — Run` });
+              }}
+            />
+          ) : null
+        }
       />
-    ) : null
-  }
-/>
 
       {/* Barre d’actions */}
       <div className="panel" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -90,38 +114,19 @@ export default function Apps() {
         </button>
 
         <button onClick={() => setShowAlbum(true)}>
-          Album
-          <span className="badge">{game.moustaches + game.pattes}</span>
+          Album <span className="badge">{game.moustaches + game.pattes}</span>
+        </button>
+
+        {/* Bouton de test pour afficher le mini-jeu tout de suite */}
+        <button onClick={() => setShowGame({ character: 'kiki', title: 'Mini-niveau (démo)' })}>
+          Mini-jeu (démo)
         </button>
       </div>
 
       {scannerOverlay}
       {albumOverlay}
+      {gameOverlay}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
-// imports en haut :
-import MiniGameOverlay from './components/MiniGameOverlay';
-
-// état :
-const [showGame, setShowGame] = useState<null | { character: 'kiki'|'toby', title: string }>(null);
-
-// dans la barre d’actions, ajoute un bouton de test :
-<button onClick={() => setShowGame({ character: 'kiki', title: 'Panthéon – Run' })}>
-  Mini-niveau (démo)
-</button>
-
-// en bas, comme pour scannerOverlay / albumOverlay :
-{showGame && (
-  <MiniGameOverlay
-    character={showGame.character}
-    title={showGame.title}
-    onClose={() => setShowGame(null)}
-    onResult={(r) => {
-      // feedback simple (tu peux brancher sur addFragment si tu veux)
-      setToast(r.won ? `🏁 Bravo ! Score ${r.score}` : `💥 Raté… Score ${r.score}`);
-      window.setTimeout(() => setToast(null), 3000);
-    }}
-  />
-)}
