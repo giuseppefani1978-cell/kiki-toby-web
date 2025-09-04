@@ -1,290 +1,161 @@
-// src/components/MiniGame.tsx
-import React, { useEffect, useRef } from 'react';
-import kaboom, {
-  KaboomCtx, Vec2,
-} from 'kaboom';
+import React, { useEffect, useRef, useState } from "react";
 
+/**
+ * Mini runner très simple en Kaboom.
+ * - A: taper ou espace pour sauter
+ * - Gagne au bout de 20s, perd à la première collision
+ * - Nettoyage propre au démontage
+ */
 type Props = {
-  character: 'kiki' | 'toby';
-  title?: string;                // ex: "Panthéon"
-  onDone: (res: { won: boolean; score: number; time: number }) => void;
+  character: "kiki" | "toby";
+  onEnd: (res: { won: boolean; score: number }) => void;
 };
 
-export default function MiniGame({ character, title = 'Paris Run', onDone }: Props) {
+export default function MiniGame({ character, onEnd }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const kRef = useRef<KaboomCtx | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!hostRef.current) return;
+    let disposed = false;
+    let kaboomCtx: any;
 
-    // Taille
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    (async () => {
+      try {
+        // import dynamique pour éviter les soucis de build si kaboom change
+        const mod = await import("kaboom");
+        const kaboom = (mod as any).default || (mod as any);
 
-    // Init kaboom dans le conteneur
-    const k = kaboom({
-      global: false,
-      root: hostRef.current,
-      width: w,
-      height: h,
-      background: [240, 244, 247],
-      touchToMouse: true,
-      canvas: undefined,       // kaboom crée son <canvas>
-      letterbox: true,
-      pixelDensity: 1,
-    });
-    kRef.current = k;
+        // crée un canvas dans le conteneur
+        const canvas = document.createElement("canvas");
+        canvas.style.width = "100%";
+        canvas.style.height = "100%";
+        canvas.style.display = "block";
+        hostRef.current!.appendChild(canvas);
 
-    // --- Aliases utiles
-    const { add, pos, rect, color, area, body, outline, anchor, z, text, vec2, time, dt, rand, onClick, onKeyPress, onUpdate, destroy, wait } = k;
+        kaboomCtx = kaboom({
+          canvas,
+          global: false,
+          background: [10, 12, 16],
+          touchToMouse: true,
+          debug: false,
+          // tailwind / pixel scaling pas nécessaire – on ajuste au parent
+          width: hostRef.current!.clientWidth,
+          height: hostRef.current!.clientHeight,
+        });
 
-    // --- HUD titre
-    add([
-      text(title, { size: 20 }),
-      pos(16, 16),
-      z(100),
-      color(20, 24, 32),
-    ]);
+        const k = kaboomCtx;
+        const W = k.width();
+        const H = k.height();
 
-    // --- Score & chrono
-    let score = 0;
-    const duration = 45; // secondes pour gagner
-    const start = time();
-    const timerLabel = add([
-      text('45.0', { size: 16 }),
-      pos(w - 80, 16),
-      z(100),
-      color(20,24,32),
-    ]);
+        // Monde basique
+        k.setGravity(1200);
 
-    const scoreLabel = add([
-      text('0', { size: 16 }),
-      pos(w - 160, 16),
-      z(100),
-      color(20,24,32),
-    ]);
+        // Sol
+        k.add([
+          k.rect(W, 24),
+          k.pos(0, H - 24),
+          k.area(),
+          k.body({ isStatic: true }),
+          k.color(40, 40, 40),
+        ]);
 
-    function updateHUD() {
-      const t = Math.max(0, duration - (time() - start));
-      timerLabel.text = t.toFixed(1);
-      scoreLabel.text = String(score);
-    }
+        // Joueur : couleur change selon le perso
+        const col = character === "kiki" ? [255, 170, 0] : [0, 160, 255];
+        const player = k.add([
+          k.rect(28, 28),
+          k.pos(40, H - 24 - 28),
+          k.area(),
+          k.body(),
+          k.color(...col),
+        ]);
 
-    // --- Sol & décor
-    const groundY = Math.floor(h * 0.8);
-    // sol
-    add([
-      rect(w, h - groundY),
-      pos(0, groundY),
-      color(220, 224, 228),
-      anchor('topleft'),
-      z(1),
-      area(),
-      body({ isStatic: true }),
-      outline(2, k.rgb(190, 194, 198)),
-    ]);
+        // Commandes (espace / clic)
+        const jump = () => {
+          if (player.isGrounded()) player.jump(520);
+        };
+        k.onKeyPress("space", jump);
+        k.onClick(jump);
 
-    // arrière-plan simple (bâtiments stylisés)
-    for (let i = 0; i < 6; i++) {
-      const bw = rand(60, 120);
-      const bh = rand(60, 180);
-      const bx = i * (w / 6) + rand(-20, 20);
-      add([
-        rect(bw, bh),
-        pos(bx, groundY - bh - 40),
-        color(210, 214, 220),
-        anchor('topleft'),
-        z(0),
-      ]);
-    }
+        // Obstacles
+        const SPEED = 220;
+        k.loop(1.1, () => {
+          const h = k.rand(22, 40);
+          const obs = k.add([
+            k.rect(18, h),
+            k.pos(W + 20, H - 24 - h),
+            k.area(),
+            "ob",
+            k.color(220, 60, 60),
+          ]);
+          obs.onUpdate(() => {
+            obs.move(-SPEED, 0);
+            if (obs.pos.x < -30) obs.destroy();
+          });
+        });
 
-    // --- Joueur
-    const isKiki = character === 'kiki';
-    const player = add([
-      rect(36, 36),
-      pos(80, groundY - 36),
-      color(isKiki ? k.rgb(255, 184, 77) : k.rgb(94, 147, 255)), // orange vs bleu
-      outline(4, k.rgb(20, 24, 32)),
-      area(),
-      body(),
-      z(10),
-      anchor('topleft'),
-      { speed: 240, jump: 560, slow: 0 },
-    ]);
+        // Collision = perdu
+        player.onCollide("ob", () => end(false));
 
-    // “visage”
-    add([
-      rect(8, 8),
-      pos(() => player.pos.add(vec2(10, 10))),
-      color(20,24,32),
-      anchor('topleft'),
-      z(12),
-    ]);
+        // Timer de victoire simple
+        k.wait(20, () => end(true));
 
-    // Tap / Space pour sauter
-    const doJump = () => {
-      if (player.isGrounded()) {
-        player.jump(player.jump);
+        function end(won: boolean) {
+          if (disposed) return;
+          disposed = true;
+          const score = Math.max(0, Math.floor(k.time() * 10));
+          try {
+            k.destroyAll?.();
+          } catch {}
+          try {
+            k.quit?.();
+          } catch {}
+          onEnd({ won, score });
+        }
+      } catch (e: any) {
+        console.error("MiniGame init error", e);
+        setError(
+          "Impossible de lancer le mini-jeu (module Kaboom indisponible)."
+        );
       }
-    };
-    onClick(doJump);
-    onKeyPress('space', doJump);
-    onKeyPress('up', doJump);
+    })();
 
-    // --- Générateurs d’obstacles & collectibles
-    const scrollSpeedBase = 260; // vitesse du monde
-    function spawnRat() {
-      const y = groundY - 22;
-      const r = add([
-        rect(28, 22),
-        pos(w + 40, y),
-        color(80, 80, 80),
-        outline(2, k.rgb(20, 24, 32)),
-        area(),
-        z(5),
-        'rat',
-        { vx: - (scrollSpeedBase + rand(20, 80)) },
-      ]);
-      r.onUpdate(() => {
-        r.move(r.vx, 0);
-        if (r.pos.x < -60) destroy(r);
-      });
-    }
-
-    function spawnPigeonPoop() {
-      const y = groundY - 10;
-      const p = add([
-        rect(18, 10),
-        pos(w + 40, y),
-        color(180, 180, 180),
-        outline(2, k.rgb(20, 24, 32)),
-        area(),
-        z(4),
-        'poop',
-        { vx: - (scrollSpeedBase + rand(0, 50)) },
-      ]);
-      p.onUpdate(() => {
-        p.move(p.vx, 0);
-        if (p.pos.x < -40) destroy(p);
-      });
-    }
-
-    function spawnCollectible() {
-      const y = groundY - rand(60, 140);
-      const c = add([
-        rect(16, 16),
-        pos(w + 40, y),
-        color(isKiki ? k.rgb(255, 149, 0) : k.rgb(0, 122, 255)),
-        outline(2, k.rgb(20, 24, 32)),
-        area(),
-        z(6),
-        'collect',
-        { vx: - (scrollSpeedBase + rand(30, 90)) },
-      ]);
-      c.onUpdate(() => {
-        c.move(c.vx, 0);
-        if (c.pos.x < -40) destroy(c);
-      });
-    }
-
-    // boucle de spawn
-    let alive = true;
-    const mainLoop = k.loop(0.9, () => {
-      if (!alive) return;
-      const roll = rand(0, 1);
-      if (roll < 0.45) spawnRat();
-      else if (roll < 0.75) spawnPigeonPoop();
-      else spawnCollectible();
-    });
-
-    // collisions
-    player.onCollide('rat', () => {
-      if (!alive) return;
-      alive = false;
-      // petit effet
-      player.color = k.rgb(200, 0, 0);
-      wait(0.3, () => finish(false));
-    });
-
-    player.onCollide('poop', (p) => {
-      // ralentit brièvement
-      player.slow = 0.8;
-      p.destroy();
-      wait(0.8, () => (player.slow = 0));
-    });
-
-    player.onCollide('collect', (c) => {
-      score += 1;
-      c.destroy();
-    });
-
-    // Scroll du monde
-    onUpdate(() => {
-      updateHUD();
-      // Win condition
-      if (alive && time() - start >= duration) {
-        alive = false;
-        return finish(true);
-      }
-      // “parallaxe” légère : arrière-plan qui glisse
-      // (ici minimal, décor statique — tu peux animer si tu veux)
-    });
-
-    // léger auto-move pour le ressenti (surtout si on ajoute de vrais niveaux plus tard)
-    // ici on ne bouge pas le player, c’est le monde qui vient à lui (les vx négatifs)
-    // mais si tu veux le déplacer :
-    // player.move((scrollSpeedBase * 0.2) * (player.slow ? 0.4 : 1), 0);
-
-    // fin de partie
-    function finish(won: boolean) {
-      mainLoop.cancel();
-      // écran résultat
-      const bg = add([
-        rect(w, h),
-        pos(0, 0),
-        color(0, 0, 0),
-        z(200),
-        { a: 0.0 },
-      ]);
-      // fade in
-      const fade = k.tween(0, 0.6, 0.4, (v) => { bg.color = k.color(0, 0, 0); (bg as any).a = v; });
-
-      add([
-        text(won ? 'BRAVO !' : 'Aïe !', { size: 28 }),
-        pos(w / 2, h / 2 - 40),
-        anchor('center'),
-        color(255, 255, 255),
-        z(201),
-      ]);
-
-      add([
-        text(`Score: ${score}`, { size: 20 }),
-        pos(w / 2, h / 2),
-        anchor('center'),
-        color(255, 255, 255),
-        z(201),
-      ]);
-
-      wait(0.8, () => {
-        onDone({ won, score, time: Math.min(duration, time() - start) });
-      });
-    }
-
-    // cleanup
     return () => {
-      try { kRef.current?.destroy(); } catch {}
-      kRef.current = null;
+      try {
+        disposed = true;
+        // si un canvas a été ajouté, on le retire
+        if (hostRef.current && hostRef.current.firstChild) {
+          hostRef.current.removeChild(hostRef.current.firstChild);
+        }
+        kaboomCtx?.quit?.();
+      } catch {}
     };
-  }, [character, title, onDone]);
+  }, [character, onEnd]);
 
   return (
     <div
       ref={hostRef}
+      className="game-host"
       style={{
-        width: '100vw',
-        height: '100vh',
-        background: '#000', // le canvas remplit ensuite
+        width: "100%",
+        height: "100%",
+        borderRadius: 12,
+        overflow: "hidden",
+        background: "#0a0c10",
       }}
-    />
+    >
+      {error && (
+        <div
+          style={{
+            color: "#fff",
+            padding: 12,
+            textAlign: "center",
+            fontSize: 14,
+          }}
+        >
+          {error}
+        </div>
+      )}
+    </div>
   );
 }
