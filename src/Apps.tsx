@@ -1,21 +1,41 @@
+// src/Apps.tsx
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import MapView from './components/MapView';
+
+import MapView, { POI } from './components/MapView';
 import QRScanner from './components/QRScanner';
+import DialogueOverlay from './components/DialogueOverlay'; // si absent, commente cette ligne
+import AlbumPanel from './components/AlbumPanel';
+
+import { game, loadGame } from './store/game';
 import '../styles.css';
 
 export default function Apps() {
+  // --- UI state ---
   const [showScan, setShowScan] = useState(false);
+  const [showAlbum, setShowAlbum] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [focus, setFocus] = useState<POI | null>(null);
 
-  // Empêche le défilement de la page quand l’overlay est ouvert
+  // force re-render quand le store "game" change (via CustomEvent)
+  const [, force] = useState(0);
+
+  // Charger l'état persistant + s'abonner aux updates de l'album
+  useEffect(() => {
+    loadGame();
+    const onUpd = () => force(x => x + 1);
+    window.addEventListener('kt-game-update', onUpd as any);
+    return () => window.removeEventListener('kt-game-update', onUpd as any);
+  }, []);
+
+  // Empêche le scroll uniquement quand le scanner est ouvert
   useEffect(() => {
     document.body.classList.toggle('modal-open', showScan);
     return () => document.body.classList.remove('modal-open');
   }, [showScan]);
 
-  // Overlay rendu dans <body> pour passer AU-DESSUS de la carte quoi qu’il arrive
-  const overlay = showScan
+  // --- Overlays portés dans <body> ---
+  const scannerOverlay = showScan
     ? createPortal(
         <div className="overlay" role="dialog" aria-modal="true">
           <div className="overlay-card">
@@ -25,9 +45,9 @@ export default function Apps() {
             </div>
             <QRScanner
               onVisit={({ partnerId }) => {
-                setShowScan(false); // ferme l’overlay dès que ça scanne
+                setShowScan(false);
                 setToast(`Visite validée chez ${partnerId} — récompense débloquée !`);
-                window.setTimeout(() => setToast(null), 3000); // auto-hide
+                window.setTimeout(() => setToast(null), 3000);
               }}
             />
             <p className="overlay-hint">Cadrez le QR. La détection est automatique.</p>
@@ -37,20 +57,45 @@ export default function Apps() {
       )
     : null;
 
+  const albumOverlay = showAlbum
+    ? createPortal(<AlbumPanel onClose={() => setShowAlbum(false)} />, document.body)
+    : null;
+
   return (
-    <div className="safe">
+    <div className="safe" style={{ position: 'relative' }}>
       <h2 style={{ margin: '8px 12px' }}>Kiki & Toby – Promenades parisiennes</h2>
 
-      {/* La carte laisse un espace en bas pour la barre d’actions */}
-      <MapView bottomSpace={140} />
+      {/* Carte : on remonte le POI cliqué via onFocus */}
+      <MapView bottomSpace={160} onFocus={setFocus} />
 
+      {/* HUD de dialogue (avatars + bulles). 
+         ⚠️ Si DialogueOverlay utilise useMap(), rends-le DANS MapView (via props), 
+         sinon garde comme ceci si ton DialogueOverlay n’emploie pas useMap(). */}
+      {focus && (
+        <DialogueOverlay
+          poi={focus}
+          onClose={() => {
+            setFocus(null);
+            setToast('Choix enregistré ✅');
+            window.setTimeout(() => setToast(null), 2000);
+          }}
+        />
+      )}
+
+      {/* Barre d’actions */}
       <div className="panel" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <button className="primary" onClick={() => setShowScan(true)}>
           Scanner QR partenaire
         </button>
+
+        <button onClick={() => setShowAlbum(true)}>
+          Album
+          <span className="badge">{game.moustaches + game.pattes}</span>
+        </button>
       </div>
 
-      {overlay}
+      {scannerOverlay}
+      {albumOverlay}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
