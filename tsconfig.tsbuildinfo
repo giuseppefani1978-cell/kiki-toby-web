@@ -1,0 +1,1 @@
+{"root":["./src/Apps.tsx","./src/main.tsx","./src/components/DialogueCard.tsx","./src/components/MapView.tsx","./src/components/QRScanner.tsx","./src/store/game.ts"],"errors":true,"version":"5.9.2"}
