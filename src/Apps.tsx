@@ -101,3 +101,27 @@ export default function Apps() {
     </div>
   );
 }
+// imports en haut :
+import MiniGameOverlay from './components/MiniGameOverlay';
+
+// état :
+const [showGame, setShowGame] = useState<null | { character: 'kiki'|'toby', title: string }>(null);
+
+// dans la barre d’actions, ajoute un bouton de test :
+<button onClick={() => setShowGame({ character: 'kiki', title: 'Panthéon – Run' })}>
+  Mini-niveau (démo)
+</button>
+
+// en bas, comme pour scannerOverlay / albumOverlay :
+{showGame && (
+  <MiniGameOverlay
+    character={showGame.character}
+    title={showGame.title}
+    onClose={() => setShowGame(null)}
+    onResult={(r) => {
+      // feedback simple (tu peux brancher sur addFragment si tu veux)
+      setToast(r.won ? `🏁 Bravo ! Score ${r.score}` : `💥 Raté… Score ${r.score}`);
+      window.setTimeout(() => setToast(null), 3000);
+    }}
+  />
+)}
