@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, type ReactNode } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import poiData from '../data/poi/05_quartier_latin.json';
@@ -18,9 +18,11 @@ const iconBrown = new L.Icon({
 export default function MapView({
   bottomSpace = 140,
   onFocus,
+  overlay,                      // <-- NEW
 }: {
   bottomSpace?: number;
   onFocus?: (p: POI) => void;
+  overlay?: ReactNode;          // <-- NEW
 }) {
   const pois = useMemo(() => poiData, []);
   const [center, setCenter] = useState<[number, number]>([48.8465, 2.344]);
@@ -40,7 +42,7 @@ export default function MapView({
   return (
     <MapContainer
       id="map"
-      style={{ height: mapHeight }}
+      style={{ height: mapHeight, position: 'relative' }}   // <-- relative pour l’overlay
       center={center}
       zoom={15}
       preferCanvas
@@ -51,6 +53,7 @@ export default function MapView({
         attribution="&copy; OpenStreetMap"
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+
       {pois.map(p => (
         <Marker
           key={p.id}
@@ -61,11 +64,25 @@ export default function MapView({
           <Popup>{p.title}</Popup>
         </Marker>
       ))}
+
       {partners.map(pt => (
         <Marker key={pt.id} position={[pt.lat, pt.lng]} icon={iconBrown}>
           <Popup>{pt.name} (Partenaire)</Popup>
         </Marker>
       ))}
+
+      {/* Overlay au-dessus de la carte (ex: bulles Kiki/Toby) */}
+      {overlay && (
+        <div
+          style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            pointerEvents: 'none',          // la carte reste interactive
+          }}
+        >
+          <div style={{ pointerEvents: 'auto' }}>{overlay}</div>
+        </div>
+      )}
     </MapContainer>
   );
 }
