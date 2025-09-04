@@ -13,7 +13,11 @@ function parseQR(raw: string) {
 
 export default function QRScanner({ onVisit }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const onVisitRef = useRef(onVisit);               // ← patch: callback stable
   const [err, setErr] = useState<string | null>(null);
+
+  // garde la ref à jour sans relancer l'effet principal
+  useEffect(() => { onVisitRef.current = onVisit; }, [onVisit]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -35,9 +39,9 @@ export default function QRScanner({ onVisit }: Props) {
         // Laisse l’overlay se peindre avant de démarrer (iOS)
         await new Promise<void>(r => requestAnimationFrame(() => r()));
 
-        const box = Math.min(Math.floor(window.innerWidth * 0.8), 380);
+        const box = Math.min(Math.floor(window.innerWidth * 0.9), 420);
 
-        // Démarrage simple et fiable : caméra arrière par "facingMode"
+        // Démarrage simple et fiable : caméra arrière par facingMode
         await qr.start(
           { facingMode: 'environment' } as any,
           { fps: 12, qrbox: { width: box, height: box } },
@@ -54,15 +58,39 @@ export default function QRScanner({ onVisit }: Props) {
             } catch { /* ignore */ }
 
             const { partnerId } = parseQR(decoded);
-            onVisit({ partnerId });   // -> Apps ferme l’overlay + affiche le toast
+            onVisitRef.current({ partnerId });   // ← patch: utilise la ref stable
           },
           /* onDecodeFailure */ () => {}
         );
 
         started = true;
       } catch (e) {
-        console.error('[QR] start error', e);
-        setErr("Impossible d'accéder à la caméra. Vérifie l'autorisation puis réessaie.");
+        // Fallback caméra frontale si l’arrière échoue (vieux iPad, desktop sans arrière)
+        try {
+          const box = Math.min(Math.floor(window.innerWidth * 0.9), 420);
+          await qr.start(
+            { facingMode: 'user' } as any,
+            { fps: 12, qrbox: { width: box, height: box } },
+            async (decoded: string) => {
+              if (handled) return;
+              handled = true;
+              try {
+                if (!stopping) {
+                  stopping = true;
+                  await qr.stop();
+                  await qr.clear();
+                }
+              } catch {}
+              const { partnerId } = parseQR(decoded);
+              onVisitRef.current({ partnerId });
+            },
+            () => {}
+          );
+          started = true;
+        } catch (e2) {
+          console.error('[QR] start failed', e, e2);
+          setErr("Impossible d'accéder à la caméra. Vérifie l'autorisation puis réessaie.");
+        }
       }
     })();
 
@@ -78,7 +106,7 @@ export default function QRScanner({ onVisit }: Props) {
         } catch { /* ignore */ }
       })();
     };
-  }, [onVisit]);
+  }, []); // ← patch: une seule fois
 
   return (
     <div
