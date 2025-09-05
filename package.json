@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "html5-qrcode": "^2.3.8",
-    "kaboom": "^3000.0.0",
+    "kaboom": "3000.1.17",
     "leaflet": "^1.9.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
