@@ -12,53 +12,63 @@ type Collectible = { x: number; y: number; r: number; vx: number };
 
 export default function MiniGame({ character, title = 'Paris Run', onDone }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cvsRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
-  const timerRef = useRef<number | null>(null);
+  const intRef = useRef<number | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
-    // Nettoyage DOM et ancien canvas
-    try {
-      if (canvasRef.current?.parentElement === host) host.removeChild(canvasRef.current);
-    } catch {}
+    // ---------- PROTECT: nettoie et (re)crée le canvas ----------
+    try { if (cvsRef.current?.parentElement === host) host.removeChild(cvsRef.current); } catch {}
     host.innerHTML = '';
 
-    // Mesure du conteneur visible
+    // Mesure (garantit une hauteur > 0)
     const rect = host.getBoundingClientRect();
-    const W = Math.max(240, Math.floor(rect.width));
-    const H = Math.max(200, Math.floor(rect.height));
+    const W = Math.max(240, Math.floor(rect.width || 0));
+    const H = Math.max(200, Math.floor(rect.height || 0));
 
-    // Canvas + styles (remplit 100%)
     const cvs = document.createElement('canvas');
-    canvasRef.current = cvs;
+    cvsRef.current = cvs;
     cvs.width = W;
     cvs.height = H;
-    cvs.style.display = 'block';
-    cvs.style.width = '100%';
-    cvs.style.height = '100%';
-    cvs.style.position = 'absolute';
-    cvs.style.inset = '0';
+    Object.assign(cvs.style, {
+      display: 'block',
+      width: '100%',
+      height: '100%',
+      position: 'absolute',
+      inset: '0',
+    } as CSSStyleDeclaration);
     host.appendChild(cvs);
 
     const ctx = cvs.getContext('2d');
-    if (!ctx) {
-      // Ultra rare, mais au cas où
-      host.textContent = 'Canvas non supporté';
-      return;
-    }
+    if (!ctx) { host.textContent = 'Canvas non supporté'; return; }
     (ctx as any).imageSmoothingEnabled = false;
 
-    // === Écran immédiat (diagnostic) ===
-    ctx.fillStyle = '#F0F4F7';
-    ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = '#141820';
-    ctx.font = '16px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-    ctx.fillText('Initialisation…', 14, 24);
+    // ---------- LOGGER VISUEL (attrape toutes erreurs) ----------
+    const paintError = (msg: string) => {
+      ctx.fillStyle = '#0b0d10'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff';
+      ctx.font = '16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Erreur mini-jeu :', W/2, H/2 - 16);
+      ctx.fillText(msg.slice(0, 120), W/2, H/2 + 10);
+      ctx.textAlign = 'start';
+    };
+    const prevOnError = window.onerror;
+    window.onerror = (msg, src, line, col, err) => {
+      paintError(String(err?.message || msg));
+      return false;
+    };
 
-    // --- State jeu ---
+    // ---------- ÉCRAN IMMÉDIAT ----------
+    ctx.fillStyle = '#0e1320'; ctx.fillRect(0, 0, W, H); // bleu nuit (pas noir)
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+    ctx.fillText('Init OK – appuie pour sauter', 14, 24);
+
+    // ---------- GAME STATE (identique à ta version) ----------
     const groundY = Math.floor(H * 0.8);
     const gravity = 1700;
     const jumpV = 620;
@@ -77,38 +87,20 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
     const coins: Collectible[] = [];
 
     // Inputs
-    const jump = () => {
-      if (!alive) return;
-      if (player.grounded) {
-        player.vy = -jumpV;
-        player.grounded = false;
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'Space' || e.code === 'ArrowUp') jump();
-    };
+    const jump = () => { if (alive && player.grounded) { player.vy = -jumpV; player.grounded = false; } };
+    const onKey = (e: KeyboardEvent) => { if (e.code === 'Space' || e.code === 'ArrowUp') jump(); };
     const onPointer = () => jump();
     window.addEventListener('keydown', onKey);
-    // pointerdown marche mieux que click (mobile)
     cvs.addEventListener('pointerdown', onPointer, { passive: true });
 
     // Spawns
     const rand = (a: number, b: number) => a + Math.random() * (b - a);
-    const spawnRat = () => {
-      const w = 28, h = 22;
-      obs.push({ x: W + 40, y: groundY - h, w, h, vx: -(worldSpeed + rand(20, 80)), type: 'rat' });
-    };
-    const spawnPoop = () => {
-      const w = 18, h = 10;
-      obs.push({ x: W + 40, y: groundY - h, w, h, vx: -(worldSpeed + rand(0, 50)), type: 'poop' });
-    };
-    const spawnCoin = () => {
-      const r = 8;
-      coins.push({ x: W + 40, y: groundY - rand(60, 140), r, vx: -(worldSpeed + rand(30, 90)) });
-    };
+    const spawnRat = () => { const w = 28, h = 22; obs.push({ x: W + 40, y: groundY - h, w, h, vx: -(worldSpeed + rand(20, 80)), type: 'rat' }); };
+    const spawnPoop = () => { const w = 18, h = 10; obs.push({ x: W + 40, y: groundY - h, w, h, vx: -(worldSpeed + rand(0, 50)), type: 'poop' }); };
+    const spawnCoin = () => { const r = 8; coins.push({ x: W + 40, y: groundY - rand(60, 140), r, vx: -(worldSpeed + rand(30, 90)) }); };
 
     let spawnAcc = 0;
-    function trySpawn(dt: number) {
+    const trySpawn = (dt: number) => {
       spawnAcc += dt;
       if (spawnAcc >= 0.9) {
         spawnAcc = 0;
@@ -117,7 +109,7 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
         else if (roll < 0.75) spawnPoop();
         else spawnCoin();
       }
-    }
+    };
 
     // Collisions
     const aabb = (a:{x:number;y:number;w:number;h:number}, b:{x:number;y:number;w:number;h:number}) =>
@@ -130,73 +122,62 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
     };
 
     // Rendu
-    function clear() {
-      ctx.fillStyle = '#F0F4F7'; ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = '#141820';
-      ctx.font = '20px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-      ctx.fillText(title, 16, 24);
-      ctx.font = '16px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-      ctx.fillText(String(score), W - 160, 22);
-      ctx.fillText(Math.max(0, duration - elapsed).toFixed(1), W - 80, 22);
-
+    const clear = () => {
+      ctx.fillStyle = '#0e1320'; ctx.fillRect(0, 0, W, H); // fond
+      ctx.fillStyle = 'rgba(255,255,255,.9)';
+      ctx.font = '20px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+      ctx.fillText(title, 16, 28);
+      ctx.font = '16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+      ctx.fillText(String(score), W - 160, 26);
+      ctx.fillText(Math.max(0, duration - elapsed).toFixed(1), W - 80, 26);
       // décor
-      ctx.fillStyle = '#D2D6DC';
+      ctx.fillStyle = '#2a3650';
       for (let i = 0; i < 6; i++) {
         const bw = 60 + (i*13 % 60);
         const bh = 60 + (i*29 % 120);
         const bx = i * (W / 6) + ((i*31)%40) - 20;
         ctx.fillRect(bx, groundY - bh - 40, bw, bh);
       }
-
       // sol
-      ctx.fillStyle = '#DCE0E4';
+      ctx.fillStyle = '#1f2937';
       ctx.fillRect(0, groundY, W, H - groundY);
-      ctx.strokeStyle = '#BEC2C6';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(0, groundY, W, H - groundY);
-    }
+    };
 
-    function drawPlayer() {
+    const drawPlayer = () => {
       ctx.fillStyle = colorBody;
       ctx.fillRect(player.x, player.y, player.w, player.h);
-      ctx.fillStyle = '#141820';
+      ctx.fillStyle = '#0b0b0b';
       ctx.fillRect(player.x + 10, player.y + 10, 8, 8);
-    }
+    };
 
-    function drawEntities() {
+    const drawEntities = () => {
       for (const o of obs) {
-        ctx.fillStyle = o.type === 'rat' ? '#505050' : '#B0B0B0';
+        ctx.fillStyle = o.type === 'rat' ? '#ef4444' : '#bdbdbd';
         ctx.fillRect(o.x, o.y, o.w, o.h);
-        ctx.strokeStyle = '#141820';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(o.x, o.y, o.w, o.h);
       }
       for (const c of coins) {
         ctx.beginPath();
-        ctx.fillStyle = character === 'kiki' ? '#FF9500' : '#007AFF';
+        ctx.fillStyle = character === 'kiki' ? '#ff9500' : '#007aff';
         ctx.arc(c.x, c.y, c.r, 0, Math.PI*2);
         ctx.fill();
-        ctx.strokeStyle = '#141820';
-        ctx.lineWidth = 2;
-        ctx.stroke();
       }
-    }
+    };
 
-    function finish(won: boolean) {
+    const finish = (won: boolean) => {
       alive = false;
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillStyle = 'rgba(0,0,0,.5)';
       ctx.fillRect(0, 0, W, H);
       ctx.fillStyle = '#fff';
-      ctx.font = '28px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.font = '28px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(won ? 'BRAVO !' : 'Aïe !', W/2, H/2 - 12);
-      ctx.font = '20px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.font = '20px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
       ctx.fillText(`Score: ${score}`, W/2, H/2 + 20);
+      ctx.textAlign = 'start';
       setTimeout(() => onDone({ won, score, time: Math.min(duration, elapsed) }), 800);
-    }
+    };
 
-    // Boucle
-    function step(dt: number) {
+    const step = (dt: number) => {
       if (!alive) return;
 
       elapsed += dt;
@@ -211,63 +192,59 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       }
 
       // Monde
-      obs.forEach(o => { o.x += o.vx * dt; });
-      coins.forEach(c => { c.x += c.vx * dt; });
+      for (const o of obs) o.x += o.vx * dt;
+      for (const c of coins) c.x += c.vx * dt;
 
       // Collisions
       for (const o of obs) {
         if (aabb(player, { x: o.x, y: o.y, w: o.w, h: o.h })) {
-          if (o.type === 'rat') { finish(false); break; }
-          else { slowFactor = 0.4; setTimeout(() => (slowFactor = 1), 800); o.x = -9999; }
+          if (o.type === 'rat') { finish(false); return; }
+          slowFactor = 0.4; setTimeout(() => (slowFactor = 1), 800); o.x = -9999;
         }
       }
-      for (const c of coins) {
-        if (rectCircle(player.x, player.y, player.w, player.h, c.x, c.y, c.r)) {
-          score += 1; c.x = -9999;
-        }
-      }
+      for (const c of coins) if (rectCircle(player.x, player.y, player.w, player.h, c.x, c.y, c.r)) { score += 1; c.x = -9999; }
 
       // Purge
       while (obs.length && obs[0].x < -60) obs.shift();
       while (coins.length && coins[0].x < -40) coins.shift();
 
-      // Spawns
+      // Spawns + rendu
       trySpawn(dt);
-
-      // Rendu
       clear();
       drawEntities();
       drawPlayer();
 
       if (elapsed >= duration) finish(true);
-    }
+    };
 
-    function frame(now: number) {
-      const dt = Math.min(0.032, (now - t0) / 1000) * slowFactor;
-      t0 = now;
-      step(dt);
-      if (alive) rafRef.current = requestAnimationFrame(frame);
-    }
+    const frame = (now: number) => {
+      try {
+        const dt = Math.min(0.032, (now - t0) / 1000) * slowFactor;
+        t0 = now;
+        step(dt);
+        if (alive) rafRef.current = requestAnimationFrame(frame);
+      } catch (e:any) {
+        paintError(e?.message || String(e));
+      }
+    };
 
-    // Démarre tout de suite (rendu immédiat + raf)
+    // Démarrage
     clear(); drawPlayer();
     t0 = performance.now();
     rafRef.current = requestAnimationFrame(frame);
 
-    // Fallback si rAF est throttlé (certaines configs iOS)
-    timerRef.current = window.setInterval(() => {
-      if (!alive) return;
-      step(1/60);
-    }, 1000/60) as unknown as number;
+    // Fallback en cas de throttle iOS
+    intRef.current = window.setInterval(() => { if (alive) step((1/60) * slowFactor); }, 1000/60) as unknown as number;
 
     // Cleanup
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (intRef.current) clearInterval(intRef.current);
       window.removeEventListener('keydown', onKey);
       cvs.removeEventListener('pointerdown', onPointer);
       if (cvs.parentElement === host) host.removeChild(cvs);
-      canvasRef.current = null;
+      cvsRef.current = null;
+      window.onerror = prevOnError || null;
     };
   }, [character, title, onDone]);
 
@@ -281,7 +258,7 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
         borderRadius: 16,
         overflow: 'hidden',
         position: 'relative',
-        background: '#0b0d10', // seulement si le canvas n’est pas rendu
+        background: '#0b0d10', // visible seulement si le canvas n’est pas peint
       }}
     />
   );
