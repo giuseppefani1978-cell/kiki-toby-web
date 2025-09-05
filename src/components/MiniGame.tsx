@@ -1,6 +1,5 @@
 // src/components/MiniGame.tsx
 import React, { useEffect, useRef } from 'react';
-import kaboom, { KaboomCtx } from 'kaboom';
 
 type Props = {
   character: 'kiki' | 'toby';
@@ -8,172 +7,256 @@ type Props = {
   onDone: (res: { won: boolean; score: number; time: number }) => void;
 };
 
+type Obstacle = { x: number; y: number; w: number; h: number; vx: number; type: 'rat' | 'poop' };
+type Collectible = { x: number; y: number; r: number; vx: number };
+
 export default function MiniGame({ character, title = 'Paris Run', onDone }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const kRef = useRef<KaboomCtx | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
-    // Nettoyage d’un éventuel contexte précédent
-    try { kRef.current?.destroy(); } catch {}
-    kRef.current = null;
+    // Mesure le conteneur (4/3 via style parent)
+    const rect = host.getBoundingClientRect();
+    const W = Math.max(240, Math.floor(rect.width));
+    const H = Math.max(200, Math.floor(rect.height));
 
-    // Taille réelle du conteneur (évite le conflit avec la fonction rect() de Kaboom)
-    const bounds = host.getBoundingClientRect();
-    const W = Math.max(240, Math.floor(bounds.width));
-    const H = Math.max(200, Math.floor(bounds.height));
-
-    // helper pour afficher un message dans le conteneur en cas d’échec
-    const showHostMessage = (msg: string) => {
-      host.innerHTML = `<div style="color:#fff;padding:12px;text-align:center;">${msg}</div>`;
-      host.style.background = '#222';
-    };
-
-    console.log('[MiniGame] init…', { W, H });
-
-    let k: KaboomCtx | null = null;
-
-    try {
-      k = kaboom({
-        global: false,
-        root: host,
-        width: W,
-        height: H,
-        background: [240, 244, 247],
-        touchToMouse: true,
-        letterbox: true,
-        pixelDensity: 1,
-      });
-    } catch (e) {
-      console.error('[MiniGame] kaboom() failed', e);
-      showHostMessage("⚠️ Impossible d'initialiser le moteur (Kaboom).");
-      return;
+    // Crée / prépare le canvas
+    let cvs = canvasRef.current;
+    if (!cvs) {
+      cvs = document.createElement('canvas');
+      canvasRef.current = cvs;
+      host.appendChild(cvs);
     }
+    cvs.width = W;
+    cvs.height = H;
+    const ctx = cvs.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
 
-    // Sanity check : le canvas a-t-il bien été inséré ?
-    const canvas = host.querySelector('canvas');
-    if (!canvas) {
-      console.error('[MiniGame] no canvas found inside host after init');
-      showHostMessage("⚠️ Le canvas du jeu n'a pas pu être créé.");
-      try { k?.destroy(); } catch {}
-      return;
-    }
-
-    kRef.current = k;
-
-    // ───────────────── Smoke-test : un petit carré qui glisse ─────────────────
-    // S’il n’apparaît pas, c’est que Kaboom ne tourne pas (erreur ailleurs).
-    const { add, pos, rect, color, onUpdate, vec2, time, text, z, rgb,
-            area, body, outline, anchor, rand, onClick, onKeyPress, destroy, wait } = k;
-
-    const probe = add([
-      rect(30, 30),
-      pos(10, 10),
-      color(255, 0, 0),
-      'probe',
-    ]);
-
-    let dir = 1;
-    onUpdate(() => {
-      probe.move(120 * dir, 0);
-      if (probe.pos.x < 10) dir = 1;
-      if (probe.pos.x > W - 40) dir = -1;
-    });
-
-    // Si on arrive ici et que tu vois le carré rouge bouger => Kaboom est OK.
-    console.log('[MiniGame] smoke-test OK, building scene…');
-
-    // ───────────────── HUD ─────────────────
-    add([text(title, { size: 20 }), pos(16, 16), z(100), color(20, 24, 32)]);
-    let score = 0;
-    const duration = 20;
-    const start = time();
-    const timerLabel = add([text(String(duration.toFixed(1)), { size: 16 }), pos(W - 80, 16), z(100), color(20,24,32)]);
-    const scoreLabel = add([text('0', { size: 16 }), pos(W - 160, 16), z(100), color(20,24,32)]);
-    const updateHUD = () => {
-      const t = Math.max(0, duration - (time() - start));
-      (timerLabel as any).text = t.toFixed(1);
-      (scoreLabel as any).text = String(score);
-    };
-
-    // ───────────────── Sol & décor ─────────────────
+    // --- State jeu ---
     const groundY = Math.floor(H * 0.8);
-    add([rect(W, H - groundY), pos(0, groundY), color(220,224,228), anchor('topleft'), z(1), area(), body({ isStatic: true }), outline(2, rgb(190,194,198))]);
-    for (let i = 0; i < 6; i++) {
-      const bw = rand(60, 120), bh = rand(60, 180), bx = i * (W / 6) + rand(-20, 20);
-      add([rect(bw, bh), pos(bx, groundY - bh - 40), color(210,214,220), anchor('topleft'), z(0)]);
-    }
+    const gravity = 1700;       // px/s²
+    const jumpV = 620;          // px/s
+    const worldSpeed = 260;     // px/s
+    const colorBody = character === 'kiki' ? '#FFB84D' : '#5E93FF';
 
-    // ───────────────── Joueur ─────────────────
-    const isKiki = character === 'kiki';
-    const player = add([
-      rect(36, 36),
-      pos(80, groundY - 36),
-      color(isKiki ? rgb(255,184,77) : rgb(94,147,255)),
-      outline(4, rgb(20,24,32)),
-      area(),
-      body(),
-      z(10),
-      anchor('topleft'),
-      { speed: 240, jump: 560, slow: 0 },
-    ]);
-
-    add([rect(8, 8), pos(() => (player as any).pos.add(vec2(10, 10))), color(20,24,32), anchor('topleft'), z(12)]);
-
-    const doJump = () => { if ((player as any).isGrounded()) (player as any).jump((player as any).jump); };
-    onClick(doJump);
-    onKeyPress('space', doJump);
-    onKeyPress('up', doJump);
-
-    // ───────────────── Obstacles / bonus ─────────────────
-    const scrollSpeedBase = 260;
-    function spawnRat() {
-      const y = groundY - 22;
-      const r = add([rect(28,22), pos(W + 40, y), color(80,80,80), outline(2, rgb(20,24,32)), area(), z(5), 'rat', { vx: -(scrollSpeedBase + rand(20, 80)) }]);
-      (r as any).onUpdate(() => { (r as any).move((r as any).vx, 0); if ((r as any).pos.x < -60) destroy(r); });
-    }
-    function spawnPigeonPoop() {
-      const y = groundY - 10;
-      const p = add([rect(18,10), pos(W + 40, y), color(180,180,180), outline(2, rgb(20,24,32)), area(), z(4), 'poop', { vx: -(scrollSpeedBase + rand(0, 50)) }]);
-      (p as any).onUpdate(() => { (p as any).move((p as any).vx, 0); if ((p as any).pos.x < -40) destroy(p); });
-    }
-    function spawnCollectible() {
-      const y = groundY - rand(60, 140);
-      const c = add([rect(16,16), pos(W + 40, y), color(isKiki ? rgb(255,149,0) : rgb(0,122,255)), outline(2, rgb(20,24,32)), area(), z(6), 'collect', { vx: -(scrollSpeedBase + rand(30, 90)) }]);
-      (c as any).onUpdate(() => { (c as any).move((c as any).vx, 0); if ((c as any).pos.x < -40) destroy(c); });
-    }
-
+    let t0 = performance.now();
     let alive = true;
-    const loop = k.loop(0.9, () => {
+    let score = 0;
+    let elapsed = 0;
+    const duration = 20;        // secondes
+    let slowFactor = 1;         // 1 → normal, <1 ralenti court
+
+    // Joueur
+    const player = { x: 80, y: groundY - 36, w: 36, h: 36, vy: 0, grounded: true };
+
+    // Entités
+    const obs: Obstacle[] = [];
+    const coins: Collectible[] = [];
+
+    // Input
+    const jump = () => {
       if (!alive) return;
-      const roll = rand(0, 1);
-      if (roll < 0.45) spawnRat();
-      else if (roll < 0.75) spawnPigeonPoop();
-      else spawnCollectible();
-    });
+      if (player.grounded) {
+        player.vy = -jumpV;
+        player.grounded = false;
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'Space' || e.code === 'ArrowUp') jump();
+    };
+    const onClick = () => jump();
+    window.addEventListener('keydown', onKey);
+    cvs.addEventListener('click', onClick);
 
-    (player as any).onCollide('rat', () => { if (!alive) return; alive = false; (player as any).color = rgb(200,0,0); wait(0.3, () => finish(false)); });
-    (player as any).onCollide('poop', (p: any) => { (player as any).slow = 0.8; p.destroy(); wait(0.8, () => ((player as any).slow = 0)); });
-    (player as any).onCollide('collect', (c: any) => { score += 1; c.destroy(); });
-
-    onUpdate(() => {
-      updateHUD();
-      if (alive && time() - start >= duration) { alive = false; finish(true); }
-    });
-
-    function finish(won: boolean) {
-      loop.cancel();
-      add([text(won ? 'BRAVO !' : 'Aïe !', { size: 28 }), pos(W/2, H/2 - 20), anchor('center'), color(0,0,0), z(201)]);
-      add([text(`Score: ${score}`, { size: 20 }), pos(W/2, H/2 + 12), anchor('center'), color(0,0,0), z(201)]);
-      wait(0.8, () => onDone({ won, score, time: Math.min(duration, time() - start) }));
+    // Spawn helpers
+    function spawnRat() {
+      const w = 28, h = 22;
+      obs.push({ x: W + 40, y: groundY - h, w, h, vx: -(worldSpeed + rand(20, 80)), type: 'rat' });
     }
+    function spawnPoop() {
+      const w = 18, h = 10;
+      obs.push({ x: W + 40, y: groundY - h, w, h, vx: -(worldSpeed + rand(0, 50)), type: 'poop' });
+    }
+    function spawnCoin() {
+      const r = 8;
+      coins.push({ x: W + 40, y: groundY - rand(60, 140), r, vx: -(worldSpeed + rand(30, 90)) });
+    }
+    function rand(a: number, b: number) { return a + Math.random() * (b - a); }
+
+    // Boucle de spawn
+    let spawnAcc = 0;
+    function trySpawn(dt: number) {
+      spawnAcc += dt;
+      if (spawnAcc >= 0.9) {
+        spawnAcc = 0;
+        const roll = Math.random();
+        if (roll < 0.45) spawnRat();
+        else if (roll < 0.75) spawnPoop();
+        else spawnCoin();
+      }
+    }
+
+    // Collisions AABB / cercle
+    function aabb(a: {x:number;y:number;w:number;h:number}, b:{x:number;y:number;w:number;h:number}) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+    function rectCircle(px:number,py:number,pw:number,ph:number, cx:number,cy:number, r:number) {
+      const rx = Math.max(px, Math.min(cx, px+pw));
+      const ry = Math.max(py, Math.min(cy, py+ph));
+      const dx = cx - rx, dy = cy - ry;
+      return dx*dx + dy*dy < r*r;
+    }
+
+    // Render helpers
+    function clear() {
+      // fond
+      ctx.fillStyle = '#F0F4F7';
+      ctx.fillRect(0, 0, W, H);
+      // titre / HUD
+      ctx.fillStyle = '#141820';
+      ctx.font = '20px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.fillText(title, 16, 24);
+      ctx.font = '16px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.fillText(String(score), W - 160, 22);
+      const remain = Math.max(0, duration - elapsed).toFixed(1);
+      ctx.fillText(remain, W - 80, 22);
+
+      // décor
+      ctx.fillStyle = '#D2D6DC';
+      for (let i = 0; i < 6; i++) {
+        const bw = 60 + (i*13 % 60);
+        const bh = 60 + (i*29 % 120);
+        const bx = i * (W / 6) + ((i*31)%40) - 20;
+        ctx.fillRect(bx, groundY - bh - 40, bw, bh);
+      }
+
+      // sol
+      ctx.fillStyle = '#DCE0E4';
+      ctx.fillRect(0, groundY, W, H - groundY);
+      ctx.strokeStyle = '#BEC2C6';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(0, groundY, W, H - groundY);
+    }
+
+    function drawPlayer() {
+      ctx.fillStyle = colorBody;
+      ctx.fillRect(player.x, player.y, player.w, player.h);
+      // œil
+      ctx.fillStyle = '#141820';
+      ctx.fillRect(player.x + 10, player.y + 10, 8, 8);
+    }
+
+    function drawEntities() {
+      // obstacles
+      for (const o of obs) {
+        if (o.type === 'rat') ctx.fillStyle = '#505050'; else ctx.fillStyle = '#B0B0B0';
+        ctx.fillRect(o.x, o.y, o.w, o.h);
+        ctx.strokeStyle = '#141820';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(o.x, o.y, o.w, o.h);
+      }
+      // pièces
+      for (const c of coins) {
+        ctx.beginPath();
+        ctx.fillStyle = character === 'kiki' ? '#FF9500' : '#007AFF';
+        ctx.arc(c.x, c.y, c.r, 0, Math.PI*2);
+        ctx.fill();
+        ctx.strokeStyle = '#141820';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+    }
+
+    // Fin
+    function finish(won: boolean) {
+      alive = false;
+      // petit overlay
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff';
+      ctx.font = '28px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(won ? 'BRAVO !' : 'Aïe !', W/2, H/2 - 12);
+      ctx.font = '20px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+      ctx.fillText(`Score: ${score}`, W/2, H/2 + 20);
+      setTimeout(() => onDone({ won, score, time: Math.min(duration, elapsed) }), 800);
+    }
+
+    // Boucle principale
+    function frame(t: number) {
+      const dt = Math.min(0.032, (t - t0) / 1000); // clamp
+      t0 = t;
+      if (alive) elapsed += dt;
+
+      // MàJ joueur
+      player.vy += gravity * dt;
+      player.y += player.vy * dt;
+      if (player.y >= groundY - player.h) {
+        player.y = groundY - player.h;
+        player.vy = 0;
+        player.grounded = true;
+      }
+
+      // MàJ monde
+      const spd = worldSpeed * dt * slowFactor;
+
+      obs.forEach(o => { o.x += o.vx * dt; });
+      coins.forEach(c => { c.x += c.vx * dt; });
+
+      // collisions
+      for (const o of obs) {
+        if (aabb(player, { x: o.x, y: o.y, w: o.w, h: o.h })) {
+          if (o.type === 'rat') {
+            finish(false);
+            break;
+          } else {
+            slowFactor = 0.4;
+            // Ralentissement court
+            setTimeout(() => { slowFactor = 1; }, 800);
+            o.x = -9999; // « détruit »
+          }
+        }
+      }
+      for (const c of coins) {
+        if (rectCircle(player.x, player.y, player.w, player.h, c.x, c.y, c.r)) {
+          score += 1;
+          c.x = -9999;
+        }
+      }
+
+      // purge
+      while (obs.length && obs[0].x < -60) obs.shift();
+      while (coins.length && coins[0].x < -40) coins.shift();
+
+      // spawn
+      if (alive) trySpawn(dt);
+
+      // rendu
+      clear();
+      drawEntities();
+      drawPlayer();
+
+      // condition de victoire
+      if (alive && elapsed >= duration) finish(true);
+
+      if (alive) rafRef.current = requestAnimationFrame(frame);
+    }
+
+    rafRef.current = requestAnimationFrame(frame);
 
     // Cleanup
     return () => {
-      try { kRef.current?.destroy(); } catch {}
-      kRef.current = null;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      window.removeEventListener('keydown', onKey);
+      cvs?.removeEventListener('click', onClick);
+      // retire le canvas pour être propre lors de l’unmount
+      if (cvs && cvs.parentElement === host) host.removeChild(cvs);
+      canvasRef.current = null;
     };
   }, [character, title, onDone]);
 
@@ -183,10 +266,11 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       style={{
         width: '100%',
         maxWidth: 680,
-        aspectRatio: '4 / 3',
+        aspectRatio: '4 / 3',   // garde EXACTEMENT la même taille qu’aujourd’hui
         background: '#0b0d10',
         borderRadius: 16,
         overflow: 'hidden',
+        position: 'relative'
       }}
     />
   );
