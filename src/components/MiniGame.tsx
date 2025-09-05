@@ -16,10 +16,43 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
   const rafRef = useRef<number | null>(null);
   const intRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
+  import { attachDebugOverlay, diagnoseCanvas } from "../utils/debugCanvas";
 
+useEffect(() => {
+  const host = hostRef.current;
+  if (!host) return;
+
+  // === DEBUG OVERLAY ===
+  const dbg = attachDebugOverlay(host);
+  (async () => {
+    const res = await diagnoseCanvas(host);
+    for (const d of res.diags) {
+      if (d.level === "ok") dbg.ok(`${d.code}${d.detail ? " — " + d.detail : ""}`);
+      if (d.level === "warn") dbg.warn(`${d.code}${d.detail ? " — " + d.detail : ""}`);
+      if (d.level === "error") dbg.error(`${d.code}${d.detail ? " — " + d.detail : ""}`);
+    }
+
+    // Si erreur critique, on s’arrête et laisse le message dans l’overlay
+    if (!res.canvas || !res.ctx2d) return;
+
+    // ✅ Tout va bien → on peut réutiliser ce canvas/ctx au lieu d’en recréer un
+    const cvs = res.canvas;
+    const ctx = res.ctx2d;
+    // IMPORTANT : s'assurer que le canvas rempli bien la carte
+    Object.assign(cvs.style, { opacity: "1" }); // visible maintenant
+
+    // … puis le reste de ta logique MiniGame (clear(), draw(), etc.)
+    // Tu peux supprimer ta création de canvas précédente pour éviter les doublons,
+    // ou bien détecter res.canvas et sauter la création.
+
+  })();
+
+  return () => {
+    // Nettoyage overlay
+    try { (host.querySelector("div[style*='ui-monospace']") as HTMLDivElement)?.remove(); } catch {}
+  };
+}, [character, title, onDone]);
+  
     // ---------- PROTECT: nettoie et (re)crée le canvas ----------
     try { if (cvsRef.current?.parentElement === host) host.removeChild(cvsRef.current); } catch {}
     host.innerHTML = '';
