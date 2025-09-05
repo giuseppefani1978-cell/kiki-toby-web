@@ -16,35 +16,76 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
     const host = hostRef.current;
     if (!host) return;
 
-    // --- 1) Taille réelle du conteneur
-    const bounds = host.getBoundingClientRect();           // ← RENOMMÉ
-    const W = Math.max(240, Math.floor(bounds.width));
-    const H = Math.max(200, Math.floor(bounds.height));
-
-    // Nettoyage si ré-init
+    // Nettoyage d’un éventuel contexte précédent
     try { kRef.current?.destroy(); } catch {}
     kRef.current = null;
 
-    // --- 2) Init kaboom DANS le conteneur
-    const k = kaboom({
-      global: false,
-      root: host,
-      width: W,
-      height: H,
-      background: [240, 244, 247],
-      touchToMouse: true,
-      letterbox: true,
-      pixelDensity: 1,
-    });
+    // Taille réelle du conteneur (évite le conflit avec la fonction rect() de Kaboom)
+    const bounds = host.getBoundingClientRect();
+    const W = Math.max(240, Math.floor(bounds.width));
+    const H = Math.max(200, Math.floor(bounds.height));
+
+    // helper pour afficher un message dans le conteneur en cas d’échec
+    const showHostMessage = (msg: string) => {
+      host.innerHTML = `<div style="color:#fff;padding:12px;text-align:center;">${msg}</div>`;
+      host.style.background = '#222';
+    };
+
+    console.log('[MiniGame] init…', { W, H });
+
+    let k: KaboomCtx | null = null;
+
+    try {
+      k = kaboom({
+        global: false,
+        root: host,
+        width: W,
+        height: H,
+        background: [240, 244, 247],
+        touchToMouse: true,
+        letterbox: true,
+        pixelDensity: 1,
+      });
+    } catch (e) {
+      console.error('[MiniGame] kaboom() failed', e);
+      showHostMessage("⚠️ Impossible d'initialiser le moteur (Kaboom).");
+      return;
+    }
+
+    // Sanity check : le canvas a-t-il bien été inséré ?
+    const canvas = host.querySelector('canvas');
+    if (!canvas) {
+      console.error('[MiniGame] no canvas found inside host after init');
+      showHostMessage("⚠️ Le canvas du jeu n'a pas pu être créé.");
+      try { k?.destroy(); } catch {}
+      return;
+    }
+
     kRef.current = k;
 
-    // Aliases (on peut maintenant utiliser "rect" de Kaboom sans conflit)
-    const {
-      add, pos, rect, color, area, body, outline, anchor, z, text, vec2,
-      time, rand, onClick, onKeyPress, onUpdate, destroy, wait, rgb,
-    } = k;
+    // ───────────────── Smoke-test : un petit carré qui glisse ─────────────────
+    // S’il n’apparaît pas, c’est que Kaboom ne tourne pas (erreur ailleurs).
+    const { add, pos, rect, color, onUpdate, vec2, time, text, z, rgb,
+            area, body, outline, anchor, rand, onClick, onKeyPress, destroy, wait } = k;
 
-    // HUD
+    const probe = add([
+      rect(30, 30),
+      pos(10, 10),
+      color(255, 0, 0),
+      'probe',
+    ]);
+
+    let dir = 1;
+    onUpdate(() => {
+      probe.move(120 * dir, 0);
+      if (probe.pos.x < 10) dir = 1;
+      if (probe.pos.x > W - 40) dir = -1;
+    });
+
+    // Si on arrive ici et que tu vois le carré rouge bouger => Kaboom est OK.
+    console.log('[MiniGame] smoke-test OK, building scene…');
+
+    // ───────────────── HUD ─────────────────
     add([text(title, { size: 20 }), pos(16, 16), z(100), color(20, 24, 32)]);
     let score = 0;
     const duration = 20;
@@ -57,7 +98,7 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       (scoreLabel as any).text = String(score);
     };
 
-    // Sol & décor
+    // ───────────────── Sol & décor ─────────────────
     const groundY = Math.floor(H * 0.8);
     add([rect(W, H - groundY), pos(0, groundY), color(220,224,228), anchor('topleft'), z(1), area(), body({ isStatic: true }), outline(2, rgb(190,194,198))]);
     for (let i = 0; i < 6; i++) {
@@ -65,12 +106,12 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       add([rect(bw, bh), pos(bx, groundY - bh - 40), color(210,214,220), anchor('topleft'), z(0)]);
     }
 
-    // Joueur
+    // ───────────────── Joueur ─────────────────
     const isKiki = character === 'kiki';
     const player = add([
       rect(36, 36),
       pos(80, groundY - 36),
-      color(isKiki ? rgb(255,184,77) : rgb(94,147,255)), // Kiki (orange) / Toby (bleu)
+      color(isKiki ? rgb(255,184,77) : rgb(94,147,255)),
       outline(4, rgb(20,24,32)),
       area(),
       body(),
@@ -79,16 +120,14 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       { speed: 240, jump: 560, slow: 0 },
     ]);
 
-    // œil
     add([rect(8, 8), pos(() => (player as any).pos.add(vec2(10, 10))), color(20,24,32), anchor('topleft'), z(12)]);
 
-    // Contrôles (tap = click = saut, pratique sur iPhone)
     const doJump = () => { if ((player as any).isGrounded()) (player as any).jump((player as any).jump); };
     onClick(doJump);
     onKeyPress('space', doJump);
     onKeyPress('up', doJump);
 
-    // Obstacles / collectibles
+    // ───────────────── Obstacles / bonus ─────────────────
     const scrollSpeedBase = 260;
     function spawnRat() {
       const y = groundY - 22;
@@ -131,6 +170,7 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       wait(0.8, () => onDone({ won, score, time: Math.min(duration, time() - start) }));
     }
 
+    // Cleanup
     return () => {
       try { kRef.current?.destroy(); } catch {}
       kRef.current = null;
