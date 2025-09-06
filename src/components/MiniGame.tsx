@@ -1,6 +1,5 @@
 // src/components/MiniGame.tsx
 import React, { useEffect, useRef } from 'react';
-import kaboom, { KaboomCtx } from 'kaboom';
 
 type Props = {
   character: 'kiki' | 'toby';
@@ -24,20 +23,7 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
     // Nettoyage si ré-init
     try { kRef.current?.destroy(); } catch {}
     kRef.current = null;
-
-    // ---- 2) Init kaboom DANS le conteneur, avec la bonne taille
-    const k = kaboom({
-      global: false,
-      root: host,
-      width: W,
-      height: H,
-      background: [240, 244, 247],
-      touchToMouse: true,
-      letterbox: true,
-      pixelDensity: 1,
-    });
-    kRef.current = k;
-
+    
     // HUD
     add([text(title, { size: 20 }), pos(16, 16), z(100), color(20, 24, 32)]);
     let score = 0;
