@@ -38,9 +38,6 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
     });
     kRef.current = k;
 
-    // Aliases
-    const { add, pos, rect, color, area, body, outline, anchor, z, text, vec2, time, rand, onClick, onKeyPress, onUpdate, destroy, wait, rgb } = k;
-
     // HUD
     add([text(title, { size: 20 }), pos(16, 16), z(100), color(20, 24, 32)]);
     let score = 0;
