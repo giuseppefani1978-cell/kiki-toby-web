@@ -10,6 +10,17 @@ type Props = {
 type Obstacle = { x: number; y: number; w: number; h: number; vx: number; type: 'rat' | 'poop' };
 type Collectible = { x: number; y: number; r: number; vx: number };
 
+// --- Helper pour charger une image (fond Panthéon, etc.) ---
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.decoding = 'async';
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
 export default function MiniGame({ character, title = 'Paris Run', onDone }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const cvsRef = useRef<HTMLCanvasElement | null>(null);
@@ -51,6 +62,15 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       return;
     }
     (ctx as any).imageSmoothingEnabled = false;
+
+    // --- FOND IMAGE (Panthéon) ---
+    const base = import.meta.env.BASE_URL || '/';
+    const wantsPantheon = title.toLowerCase().includes('panthéon');
+    const bgURL = wantsPantheon ? `${base}img/bg/pantheon.png` : '';
+    let bgImage: HTMLImageElement | null = null;
+    if (bgURL) {
+      loadImage(bgURL).then(img => { bgImage = img; }).catch(() => { bgImage = null; });
+    }
 
     // --- Paramètres jeu ---
     const groundY = Math.floor(H * 0.8);
@@ -125,7 +145,21 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
 
     // Rendu
     const clear = () => {
-      ctx.fillStyle = '#0e1320'; ctx.fillRect(0, 0, W, H); // fond
+      // Fond image si dispo (cover)
+      if (bgImage) {
+        const cw = W, ch = H;
+        const iw = bgImage.width, ih = bgImage.height;
+        const cr = cw / ch, ir = iw / ih;
+        let dw = cw, dh = ch, dx = 0, dy = 0;
+        if (ir > cr) { dh = ch; dw = dh * ir; dx = (cw - dw) / 2; dy = 0; }
+        else { dw = cw; dh = dw / ir; dx = 0; dy = (ch - dh) / 2; }
+        ctx.drawImage(bgImage, dx, dy, dw, dh);
+      } else {
+        // fallback
+        ctx.fillStyle = '#0e1320'; ctx.fillRect(0, 0, W, H);
+      }
+
+      // HUD
       ctx.fillStyle = 'rgba(255,255,255,.9)';
       ctx.font = '20px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
       ctx.fillText(title, 16, 28);
@@ -133,8 +167,8 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       ctx.fillText(String(score), W - 160, 26);
       ctx.fillText(Math.max(0, duration - elapsed).toFixed(1), W - 80, 26);
 
-      // décor
-      ctx.fillStyle = '#2a3650';
+      // décor léger par-dessus le fond
+      ctx.fillStyle = 'rgba(42,54,80,.65)';
       for (let i = 0; i < 6; i++) {
         const bw = 60 + (i*13 % 60);
         const bh = 60 + (i*29 % 120);
@@ -143,7 +177,7 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       }
 
       // sol
-      ctx.fillStyle = '#1f2937';
+      ctx.fillStyle = 'rgba(31,41,55,.8)';
       ctx.fillRect(0, groundY, W, H - groundY);
     };
 
