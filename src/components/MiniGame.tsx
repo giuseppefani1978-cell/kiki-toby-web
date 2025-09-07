@@ -167,15 +167,6 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       ctx.fillText(String(score), W - 160, 26);
       ctx.fillText(Math.max(0, duration - elapsed).toFixed(1), W - 80, 26);
 
-      // décor léger par-dessus le fond
-      ctx.fillStyle = 'rgba(42,54,80,.65)';
-      for (let i = 0; i < 6; i++) {
-        const bw = 60 + (i*13 % 60);
-        const bh = 60 + (i*29 % 120);
-        const bx = i * (W / 6) + ((i*31)%40) - 20;
-        ctx.fillRect(bx, groundY - bh - 40, bw, bh);
-      }
-
       // sol
       ctx.fillStyle = 'rgba(31,41,55,.8)';
       ctx.fillRect(0, groundY, W, H - groundY);
