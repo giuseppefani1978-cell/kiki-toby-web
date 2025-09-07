@@ -18,19 +18,6 @@
     <div id="root"></div>
 
     <script type="module" src="/src/main.tsx"></script>
-    <script>
-      // Enregistrement SW avec fallback (absolu pour Pages, relatif si nécessaire)
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          const tryRegister = (path) =>
-            navigator.serviceWorker.register(path).catch(() => null);
-
-          // Chemin attendu sur GitHub Pages
-          tryRegister('/kiki-toby-web/sw.js')
-            // Fallback si jamais l’app est servie ailleurs
-            .then(r => r || tryRegister('./sw.js'));
-        });
-      }
-    </script>
+    
   </body>
 </html>

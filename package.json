@@ -9,15 +9,15 @@
   },
   "dependencies": {
     "html5-qrcode": "^2.3.8",
-    "kaboom": "3000.1.17",
     "leaflet": "^1.9.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-leaflet": "^4.2.1"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.8",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
-    "@types/leaflet": "^1.9.8"
+    "vite": "^5.2.0"
   }
 }
