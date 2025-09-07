@@ -5,12 +5,18 @@ type Props = {
   character: 'kiki' | 'toby';
   title?: string;
   onDone: (res: { won: boolean; score: number; time: number }) => void;
+
+  // ⬇️ Nouveaux contrôles optionnels (depuis l’overlay)
+  moveLeft?: boolean;
+  moveRight?: boolean;
+  /** Incrémente ce nombre pour déclencher un saut (ex: 0 -> 1 -> 2 …) */
+  jumpTick?: number;
 };
 
 type Obstacle = { x: number; y: number; w: number; h: number; vx: number; type: 'rat' | 'poop' };
 type Collectible = { x: number; y: number; r: number; vx: number };
 
-// --- Helper pour charger une image (fond Panthéon, etc.) ---
+// --- Helper pour charger une image de fond ---
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -21,11 +27,38 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-export default function MiniGame({ character, title = 'Paris Run', onDone }: Props) {
+export default function MiniGame({
+  character,
+  title = 'Paris Run',
+  onDone,
+  moveLeft,
+  moveRight,
+  jumpTick,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const cvsRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const intRef = useRef<number | null>(null);
+
+  // refs pour lire les commandes externes sans recâbler toute la boucle
+  const moveLeftRef = useRef<boolean>(!!moveLeft);
+  const moveRightRef = useRef<boolean>(!!moveRight);
+  const lastJumpTickRef = useRef<number>(jumpTick ?? 0);
+
+  useEffect(() => { moveLeftRef.current = !!moveLeft; }, [moveLeft]);
+  useEffect(() => { moveRightRef.current = !!moveRight; }, [moveRight]);
+
+  useEffect(() => {
+    // si jumpTick change et augmente → on saute
+    if (jumpTick === undefined) return;
+    if (jumpTick !== lastJumpTickRef.current) {
+      lastJumpTickRef.current = jumpTick;
+      requestJumpRef.current = true;
+    }
+  }, [jumpTick]);
+
+  // flag pour demander un saut au prochain step()
+  const requestJumpRef = useRef(false);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -86,19 +119,15 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
     const duration = 20;
     let slowFactor = 1;
 
-    // ⬇️ joueur avec déplacement horizontal
     const player = {
       x: 80, y: groundY - 36, w: 36, h: 36,
-      vy: 0,                 // vitesse verticale
-      vx: 0,                 // vitesse horizontale instantanée
-      speed: 240,            // vitesse max (réglable)
-      grounded: true,
+      vy: 0, vx: 0, speed: 240, grounded: true,
     };
 
     const obs: Obstacle[] = [];
     const coins: Collectible[] = [];
 
-    // ---- Inputs
+    // ---- Inputs clavier (toujours dispo sur desktop)
     const jump = () => {
       if (!alive) return;
       if (player.grounded) {
@@ -107,22 +136,18 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       }
     };
 
-    // flags de déplacement (clavier)
-    let movingLeft = false;
-    let movingRight = false;
-
     const onKey = (e: KeyboardEvent) => {
       const down = e.type === 'keydown';
       if (e.code === 'Space' || e.code === 'ArrowUp') {
         if (down) jump();
       } else if (e.code === 'ArrowLeft') {
-        movingLeft = down;
+        moveLeftRef.current = down;
       } else if (e.code === 'ArrowRight') {
-        movingRight = down;
+        moveRightRef.current = down;
       }
     };
 
-    // clic/tap = saut (pour mobile)
+    // Sur mobile : tap = saut (les boutons sont gérés dans l’overlay)
     const onPointer = () => jump();
 
     window.addEventListener('keydown', onKey);
@@ -169,7 +194,6 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
 
     // ---- Rendu
     const clear = () => {
-      // Fond image (cover)
       if (bgImage) {
         const cw = W, ch = H;
         const iw = bgImage.width, ih = bgImage.height;
@@ -236,7 +260,16 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
 
       elapsed += dt;
 
-      // Physique verticale (gravité / saut)
+      // Saut demandé par l’overlay ?
+      if (requestJumpRef.current) {
+        requestJumpRef.current = false;
+        if (player.grounded) {
+          player.vy = -jumpV;
+          player.grounded = false;
+        }
+      }
+
+      // Physique verticale
       player.vy += gravity * dt;
       player.y += player.vy * dt;
       if (player.y >= groundY - player.h) {
@@ -245,8 +278,10 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
         player.grounded = true;
       }
 
-      // Mouvement horizontal (clavier)
-      player.vx = (movingRight ? player.speed : 0) - (movingLeft ? player.speed : 0);
+      // Mouvement horizontal (clavier OU commandes overlay)
+      const left = moveLeftRef.current ? 1 : 0;
+      const right = moveRightRef.current ? 1 : 0;
+      player.vx = (right - left) * player.speed;
       player.x += player.vx * dt;
 
       // Limites écran
@@ -270,7 +305,7 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
         }
       }
 
-      // Purge
+      // Purges
       while (obs.length && obs[0].x < -60) obs.shift();
       while (coins.length && coins[0].x < -40) coins.shift();
 
@@ -295,7 +330,7 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
     t0 = performance.now();
     rafRef.current = requestAnimationFrame(frame);
 
-    // Fallback en cas de throttle iOS (onglet inactif)
+    // Fallback en cas de throttle iOS
     intRef.current = window.setInterval(() => {
       if (alive) step((1/60) * slowFactor);
     }, 1000/60) as unknown as number;
@@ -310,7 +345,7 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       if (cvs.parentElement === host) host.removeChild(cvs);
       cvsRef.current = null;
     };
-  }, [character, title, onDone]);
+  }, [character, title, onDone]); // les commandes externes passent par refs
 
   return (
     <div
