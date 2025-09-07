@@ -66,7 +66,7 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
     // --- FOND IMAGE (Panthéon) ---
     const base = import.meta.env.BASE_URL || '/';
     const wantsPantheon = title.toLowerCase().includes('panthéon');
-    const bgURL = wantsPantheon ? `${base}img/bg/pantheon.png` : '';
+    const bgURL = wantsPantheon ? `${base}img/bg/pantheon.PNG` : '';
     let bgImage: HTMLImageElement | null = null;
     if (bgURL) {
       loadImage(bgURL).then(img => { bgImage = img; }).catch(() => { bgImage = null; });
