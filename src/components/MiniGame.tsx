@@ -10,7 +10,7 @@ type Props = {
 type Obstacle = { x: number; y: number; w: number; h: number; vx: number; type: 'rat' | 'poop' };
 type Collectible = { x: number; y: number; r: number; vx: number };
 
-// Helper image (fond)
+// ---- utils
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -24,12 +24,11 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 export default function MiniGame({ character, title = 'Paris Run', onDone }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const cvsRef = useRef<HTMLCanvasElement | null>(null);
-
-  // 🔒 Empêche une double initialisation (StrictMode / re-render parent)
   const initedRef = useRef(false);
 
   useEffect(() => {
-    if (initedRef.current) return; // déjà lancé
+    // éviter la double init (StrictMode)
+    if (initedRef.current) return;
     initedRef.current = true;
 
     const host = hostRef.current;
@@ -37,18 +36,18 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
 
     // --- Canvas HiDPI ---
     const rect = host.getBoundingClientRect();
-    const cssW = Math.max(240, Math.floor(rect.width));
-    const cssH = Math.max(200, Math.floor(rect.height));
-    const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    const CSS_W = Math.max(240, Math.floor(rect.width));
+    const CSS_H = Math.max(200, Math.floor(rect.height));
+    const DPR = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
 
     const cvs = document.createElement('canvas');
     cvsRef.current = cvs;
-    cvs.width = Math.floor(cssW * dpr);
-    cvs.height = Math.floor(cssH * dpr);
+    cvs.width  = Math.floor(CSS_W * DPR);
+    cvs.height = Math.floor(CSS_H * DPR);
     Object.assign(cvs.style, {
       display: 'block',
-      width: `${cssW}px`,
-      height: `${cssH}px`,
+      width: `${CSS_W}px`,
+      height: `${CSS_H}px`,
       position: 'absolute',
       inset: '0',
       touchAction: 'none',
@@ -57,75 +56,102 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
 
     const ctx = cvs.getContext('2d');
     if (!ctx) { host.textContent = 'Canvas non supporté'; return; }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     (ctx as any).imageSmoothingEnabled = true;
 
-    // --- Fond (Panthéon si titre contient “panthéon”) ---
+    // --- Fond image (Panthéon si demandé) ---
     const base = import.meta.env.BASE_URL || '/';
     const wantsPantheon = title.toLowerCase().includes('panthéon');
     const bgURL = wantsPantheon ? `${base}img/bg/pantheon.PNG` : '';
     let bgImage: HTMLImageElement | null = null;
-    if (bgURL) loadImage(bgURL).then(img => { bgImage = img; }).catch(() => { bgImage = null; });
+    if (bgURL) loadImage(bgURL).then(i => (bgImage = i)).catch(() => (bgImage = null));
 
-    // --- Paramètres adoucis ---
-    const groundY = Math.floor(cssH * 0.8);
-    const gravity = 1500;
-    const jumpV = 540;
-    const playerAccel = 1200;      // accélération horizontale
-    const friction = 900;          // frottement quand aucune entrée
-    const maxSpeed = 220;          // vitesse max horizontale
-    const worldSpeed = 180;
+    // --- Constantes gameplay (adoucies) ---
+    const groundY     = Math.floor(CSS_H * 0.80);
+    const gravity     = 1500;
+    const jumpV       = 540;
+    const accelX      = 1200;
+    const frictionX   = 900;
+    const maxVx       = 220;
+    const worldSpeed  = 170;     // moins rapide
+    const DURATION    = 20;      // secondes de jeu
+    const START_DELAY = 0.8;     // protection départ (sec)
+
     const bodyColor = character === 'kiki' ? '#FFB84D' : '#5E93FF';
 
-    const DURATION = 20;
-    let elapsed = 0;
-    let score = 0;
-    let alive = true;
-    let slowFactor = 1;
-
+    // --- État
     const player = { x: 80, y: groundY - 36, w: 36, h: 36, vx: 0, vy: 0, grounded: true };
-
     const obs: Obstacle[] = [];
     const coins: Collectible[] = [];
 
-    // --- Entrées clavier ---
-    const keys = { left: false, right: false, jump: false };
+    let score = 0;
+    let elapsed = 0;       // temps réel de jeu (n’est PAS ralenti)
+    let alive = true;
+    let slow = 1;          // 0.5 quand caca pigeon, remonte à 1 ensuite
+    let startCountdown = START_DELAY;
+    let finishReason: 'rat' | 'time' | null = null;
+
+    // --- Entrées
+    const keys = { left: false, right: false, wantJump: false };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'ArrowLeft') keys.left = true;
-      else if (e.code === 'ArrowRight') keys.right = true;
-      else if (e.code === 'Space' || e.code === 'ArrowUp') keys.jump = true;
+      if (e.code === 'ArrowLeft')  keys.left = true;
+      if (e.code === 'ArrowRight') keys.right = true;
+      if (e.code === 'Space' || e.code === 'ArrowUp') keys.wantJump = true;
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'ArrowLeft') keys.left = false;
-      else if (e.code === 'ArrowRight') keys.right = false;
+      if (e.code === 'ArrowLeft')  keys.left = false;
+      if (e.code === 'ArrowRight') keys.right = false;
+      // pas besoin de remetre wantJump à false ici (on consommera dans step)
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
-    const onPointer = () => { keys.jump = true; };
+    const onPointer = () => { keys.wantJump = true; };
     cvs.addEventListener('pointerdown', onPointer, { passive: true });
 
-    // --- Spawns ---
+    // --- Spawns protégés ---
     const rnd = (a: number, b: number) => a + Math.random() * (b - a);
     let spawnAcc = 0;
-    const trySpawn = (dt: number) => {
+
+    function safeSpawnZoneX() {
+      // zone protégée devant le joueur (pas de spawn dedans)
+      return player.x + player.w + 24;
+    }
+
+    function trySpawn(dt: number) {
+      // pas de spawn pendant le START_DELAY
+      if (startCountdown > 0) return;
+
       spawnAcc += dt;
-      if (spawnAcc >= 1.1) {
-        spawnAcc = 0;
-        const r = Math.random();
-        if (r < 0.40) {
-          const w = 28, h = 22;
-          obs.push({ x: cssW + 40, y: groundY - h, w, h, vx: -(worldSpeed + rnd(10, 50)), type: 'rat' });
-        } else if (r < 0.70) {
-          const w = 18, h = 10;
-          obs.push({ x: cssW + 40, y: groundY - h, w, h, vx: -(worldSpeed + rnd(0, 30)), type: 'poop' });
-        } else {
-          const r = 8;
-          coins.push({ x: cssW + 40, y: groundY - rnd(60, 140), r, vx: -(worldSpeed + rnd(10, 60)) });
+      if (spawnAcc < 1.1) return;
+      spawnAcc = 0;
+
+      const r = Math.random();
+      if (r < 0.40) {
+        const w = 28, h = 22;
+        const x = CSS_W + 40;
+        const y = groundY - h;
+        if (x > safeSpawnZoneX() + 40) {
+          obs.push({ x, y, w, h, vx: -(worldSpeed + rnd(10, 50)), type: 'rat' });
+        }
+      } else if (r < 0.70) {
+        const w = 18, h = 10;
+        const x = CSS_W + 40;
+        const y = groundY - h;
+        if (x > safeSpawnZoneX() + 40) {
+          obs.push({ x, y, w, h, vx: -(worldSpeed + rnd(0, 30)), type: 'poop' });
+        }
+      } else {
+        const r2 = 8;
+        const x = CSS_W + 40;
+        const y = groundY - rnd(60, 140);
+        if (x > safeSpawnZoneX() + 40) {
+          coins.push({ x, y, r: r2, vx: -(worldSpeed + rnd(10, 60)) });
         }
       }
-      if (obs.length > 12) obs.splice(0, obs.length - 12);
+
+      if (obs.length > 12)   obs.splice(0, obs.length - 12);
       if (coins.length > 10) coins.splice(0, coins.length - 10);
-    };
+    }
 
     // --- Collisions ---
     const aabb = (a:{x:number;y:number;w:number;h:number}, b:{x:number;y:number;w:number;h:number}) =>
@@ -139,10 +165,10 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
     };
 
     // --- Rendu ---
-    const draw = () => {
+    function draw() {
       // fond
       if (bgImage) {
-        const cw = cssW, ch = cssH;
+        const cw = CSS_W, ch = CSS_H;
         const iw = bgImage.width, ih = bgImage.height;
         const cr = cw / ch, ir = iw / ih;
         let dw = cw, dh = ch, dx = 0, dy = 0;
@@ -151,12 +177,12 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
         ctx.drawImage(bgImage, dx, dy, dw, dh);
       } else {
         ctx.fillStyle = '#0e1320';
-        ctx.fillRect(0, 0, cssW, cssH);
+        ctx.fillRect(0, 0, CSS_W, CSS_H);
       }
 
       // sol
       ctx.fillStyle = 'rgba(31,41,55,.85)';
-      ctx.fillRect(0, groundY, cssW, cssH - groundY);
+      ctx.fillRect(0, groundY, CSS_W, CSS_H - groundY);
 
       // entités
       for (const o of obs) {
@@ -177,121 +203,146 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       ctx.fillRect(player.x + 10, player.y + 10, 8, 8);
 
       // HUD
-      ctx.fillStyle = 'rgba(255,255,255,.92)';
+      ctx.fillStyle = 'rgba(255,255,255,.94)';
       ctx.font = '20px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
       ctx.fillText(title, 16, 28);
       ctx.font = '16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
-      ctx.fillText(String(score), cssW - 160, 26);
-      ctx.fillText(Math.max(0, DURATION - elapsed).toFixed(1), cssW - 80, 26);
-    };
+      ctx.fillText(String(score), CSS_W - 160, 26);
+      ctx.fillText(Math.max(0, DURATION - elapsed).toFixed(1), CSS_W - 80, 26);
 
-    // --- Step (60 FPS fixe)
+      // message départ
+      if (startCountdown > 0) {
+        ctx.fillStyle = 'rgba(0,0,0,.45)';
+        ctx.fillRect(0, 0, CSS_W, CSS_H);
+        ctx.fillStyle = '#fff';
+        ctx.font = '22px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Prêt ? Appuie pour sauter !', CSS_W / 2, CSS_H / 2);
+        ctx.textAlign = 'start';
+      }
+
+      // écran fin
+      if (!alive) {
+        ctx.fillStyle = 'rgba(0,0,0,.55)';
+        ctx.fillRect(0, 0, CSS_W, CSS_H);
+        ctx.fillStyle = '#fff';
+        ctx.font = '28px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(finishReason === 'rat' ? 'Aïe !' : 'BRAVO !', CSS_W / 2, CSS_H / 2 - 12);
+        ctx.font = '18px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+        ctx.fillText(`Score: ${score}`, CSS_W / 2, CSS_H / 2 + 18);
+        // mini debug
+        if (finishReason) ctx.fillText(`(raison: ${finishReason})`, CSS_W / 2, CSS_H / 2 + 42);
+        ctx.textAlign = 'start';
+      }
+    }
+
+    // --- Boucle fixe 60 FPS ---
     const STEP = 1 / 60;
     const MAX_FRAME = 0.10;
     let acc = 0;
     let t0 = performance.now() / 1000;
 
-    const finish = (won: boolean) => {
+    function finish(reason: 'rat' | 'time') {
       alive = false;
-      ctx.fillStyle = 'rgba(0,0,0,.5)';
-      ctx.fillRect(0, 0, cssW, cssH);
-      ctx.fillStyle = '#fff';
-      ctx.font = '28px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(won ? 'BRAVO !' : 'Aïe !', cssW / 2, cssH / 2 - 12);
-      ctx.font = '20px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
-      ctx.fillText(`Score: ${score}`, cssW / 2, cssH / 2 + 20);
-      ctx.textAlign = 'start';
-      setTimeout(() => onDone({ won, score, time: Math.min(DURATION, elapsed) }), 700);
-    };
+      finishReason = reason;
+      setTimeout(() => onDone({ won: reason === 'time', score, time: Math.min(DURATION, elapsed) }), 650);
+    }
 
-    const stepOnce = () => {
-      // saut
-      if (keys.jump && player.grounded) {
+    function stepOnce() {
+      // protection départ
+      if (startCountdown > 0) {
+        startCountdown = Math.max(0, startCountdown - STEP);
+        return;
+      }
+
+      // saut (consommation)
+      if (keys.wantJump && player.grounded) {
         player.vy = -jumpV;
         player.grounded = false;
       }
-      keys.jump = false;
+      keys.wantJump = false;
 
       // vertical
       player.vy += gravity * STEP;
-      player.y += player.vy * STEP;
+      player.y  += player.vy * STEP;
       if (player.y >= groundY - player.h) {
         player.y = groundY - player.h;
         player.vy = 0;
         player.grounded = true;
       }
 
-      // horizontal → accélération + friction (ne ramène PAS à x=80)
+      // horizontal (accélération + friction), ralenti par "slow"
       let ax = 0;
-      if (keys.left) ax -= playerAccel;
-      if (keys.right) ax += playerAccel;
-      if (!keys.left && !keys.right) {
-        // friction vers 0
-        if (player.vx > 0) { player.vx = Math.max(0, player.vx - friction * STEP); }
-        else if (player.vx < 0) { player.vx = Math.min(0, player.vx + friction * STEP); }
-      } else {
-        player.vx += ax * STEP;
-      }
-      // bornage vitesse
-      if (player.vx > maxSpeed) player.vx = maxSpeed;
-      if (player.vx < -maxSpeed) player.vx = -maxSpeed;
+      if (keys.left)  ax -= accelX;
+      if (keys.right) ax += accelX;
 
-      player.x += player.vx * STEP;
+      if (ax === 0) {
+        if (player.vx > 0) player.vx = Math.max(0, player.vx - frictionX * STEP);
+        if (player.vx < 0) player.vx = Math.min(0, player.vx + frictionX * STEP);
+      } else {
+        player.vx += (ax * slow) * STEP;
+      }
+      if (player.vx >  maxVx) player.vx =  maxVx;
+      if (player.vx < -maxVx) player.vx = -maxVx;
+      player.x += (player.vx * slow) * STEP;
 
       // limites écran
       if (player.x < 8) { player.x = 8; player.vx = 0; }
-      if (player.x > cssW - player.w - 8) { player.x = cssW - player.w - 8; player.vx = 0; }
+      if (player.x > CSS_W - player.w - 8) { player.x = CSS_W - player.w - 8; player.vx = 0; }
 
-      // monde
-      for (const o of obs) o.x += o.vx * STEP;
-      for (const c of coins) c.x += c.vx * STEP;
+      // monde qui défile (ralenti si slow)
+      for (const o of obs)   o.x += (o.vx * slow) * STEP;
+      for (const c of coins) c.x += (c.vx * slow) * STEP;
 
-      // collisions
+      // collisions (uniquement après le START_DELAY)
       for (const o of obs) {
         if (aabb(player, { x: o.x, y: o.y, w: o.w, h: o.h })) {
-          if (o.type === 'rat') { finish(false); return; }
-          slowFactor = 0.5; setTimeout(() => (slowFactor = 1), 600);
+          if (o.type === 'rat') { finish('rat'); return; }
+          // caca → ralentit un peu
+          slow = 0.55; setTimeout(() => (slow = 1), 650);
           o.x = -9999;
         }
       }
       for (const c of coins) {
-        if (rectCircle(player.x, player.y, player.w, player.h, c.x, c.y, c.r)) {
-          score += 1; c.x = -9999;
-        }
+        if (rectCircle(player.x, player.y, player.w, player.h, c.x, c.y, c.r)) { score += 1; c.x = -9999; }
       }
 
-      while (obs.length && obs[0].x < -80) obs.shift();
-      while (coins.length && coins[0].x < -60) coins.shift();
+      // purge
+      while (obs.length && obs[0].x < -100)   obs.shift();
+      while (coins.length && coins[0].x < -80) coins.shift();
 
+      // spawns
       trySpawn(STEP);
-      elapsed += STEP * slowFactor;
-      if (elapsed >= DURATION) finish(true);
-    };
 
-    const loop = (nowMs: number) => {
+      // temps (toujours réel, pas ralenti)
+      elapsed += STEP;
+      if (elapsed >= DURATION) { finish('time'); return; }
+    }
+
+    function loop(nowMs: number) {
       const now = nowMs / 1000;
       let dt = now - t0;
       t0 = now;
       if (dt > MAX_FRAME) dt = MAX_FRAME;
 
-      acc += dt * slowFactor;
+      acc += dt;
       let guard = 0;
-      while (acc >= STEP && guard < 6) {
+      while (acc >= STEP && guard < 6 && alive) {
         stepOnce();
         acc -= STEP;
         guard++;
-        if (!alive) break;
       }
 
       draw();
       if (alive) requestAnimationFrame(loop);
-    };
+    }
 
+    // kick
     draw();
     requestAnimationFrame(loop);
 
-    // Cleanup à la fermeture de l’overlay
+    // --- Cleanup ---
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
@@ -299,7 +350,7 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       if (cvs.parentElement === host) host.removeChild(cvs);
       cvsRef.current = null;
     };
-  }, [character, title, onDone]); // on ne relance pas à chaque re-render
+  }, [character, title, onDone]);
 
   return (
     <div
