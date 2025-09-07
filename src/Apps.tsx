@@ -128,27 +128,36 @@ export default function Apps() {
     <div className="safe" style={{ position: 'relative' }} aria-hidden={hasAnyOverlay}>
       <h2 style={{ margin: '8px 12px' }}>Kiki & Toby – Promenades parisiennes</h2>
 
-      {/* La carte reçoit un overlay léger (bulles) rendu au-dessus du <MapContainer> */}
       <MapView
-        bottomSpace={160}
-        onFocus={setFocus}
-        overlay={
-          focus ? (
-            <DialogueOverlay
-              poi={focus}
-              onClose={() => {
-                setFocus(null);
-                setToast('Choix enregistré ✅');
-                window.setTimeout(() => setToast(null), 2000);
+  bottomSpace={160}
+  onFocus={setFocus}
+  overlay={
+    focus ? (
+      <DialogueOverlay
+        poi={focus}
+        onClose={(picked?: 'kiki' | 'toby') => {
+          // on capture le poi courant avant de le nettoyer
+          const poi = focus;
+          setFocus(null);
 
-                // Exemple: lancer un mini-jeu juste après un choix
-                // setShowGame({ character: 'kiki', title: `${focus.title} — Run` });
-              }}
-            />
-          ) : null
-        }
+          setToast('Choix enregistré ✅');
+          window.setTimeout(() => setToast(null), 2000);
+
+          // Si on est sur un Panthéon → on enchaîne sur le mini-jeu
+          if (poi && poi.title.toLowerCase().includes('panthéon')) {
+            // léger délai pour laisser l’overlay se fermer proprement
+            window.setTimeout(() => {
+              setShowGame({
+                character: picked || 'kiki',       // 'kiki' par défaut si non fourni
+                title: `${poi.title} — Run`,
+              });
+            }, 120);
+          }
+        }}
       />
-
+    ) : null
+  }
+/>
       {/* Barre d’actions */}
       <div className="panel" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <button type="button" className="primary" onClick={(e) => { e.currentTarget.blur(); setShowScan(true); }}>
