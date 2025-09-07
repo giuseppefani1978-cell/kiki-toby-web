@@ -1,3 +1,4 @@
+// src/components/MiniGameOverlay.tsx
 import React from "react";
 import MiniGame from "./MiniGame";
 
@@ -5,7 +6,7 @@ type Props = {
   character: "kiki" | "toby";
   title: string;
   onClose: () => void;
-  onResult: (r: { won: boolean; score: number }) => void;
+  onResult: (r: { won: boolean; score: number; time: number }) => void;
 };
 
 export default function MiniGameOverlay({
@@ -16,17 +17,51 @@ export default function MiniGameOverlay({
 }: Props) {
   return (
     <div className="overlay" role="dialog" aria-modal="true">
-      <div className="overlay-card" style={{ width: "min(760px, 96vw)" }}>
-        <div className="overlay-head" style={{ marginBottom: 8 }}>
+      <div
+        className="overlay-card"
+        style={{
+          width: "min(760px, 96vw)",
+          maxWidth: "96vw",
+          borderRadius: 12,
+          overflow: "hidden",
+        }}
+      >
+        {/* En-tête */}
+        <div
+          className="overlay-head"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 8,
+          }}
+        >
           <b>{title}</b>
           <button onClick={onClose} aria-label="Fermer">
             ✕
           </button>
         </div>
 
-        {/* Aire de jeu : 70vh max */}
-        <div style={{ width: "100%", height: "min(70vh, 520px)" }}>
-          <MiniGame character={character} onEnd={(r) => { onClose(); onResult(r); }} />
+        {/* Conteneur du mini-jeu */}
+        <div
+          style={{
+            width: "100%",
+            aspectRatio: "4 / 3",   // ratio fixe pour que le canvas ait une hauteur
+            minHeight: 240,         // sécurité : jamais 0px
+            position: "relative",   // nécessaire car le <canvas> est en absolute
+            background: "#0b0d10",  // visible si jamais le canvas n’est pas rendu
+            borderRadius: 12,
+            overflow: "hidden",
+          }}
+        >
+          <MiniGame
+            character={character}
+            title={title}
+            onDone={(r) => {
+              onResult(r); // transmettre le résultat
+              onClose();   // fermer ensuite
+            }}
+          />
         </div>
 
         <p className="overlay-hint" style={{ marginTop: 8 }}>
