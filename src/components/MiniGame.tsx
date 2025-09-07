@@ -5,6 +5,10 @@ type Props = {
   character: 'kiki' | 'toby';
   title?: string;
   onDone: (res: { won: boolean; score: number; time: number }) => void;
+  // NEW: inputs from MiniGameOverlay (optional)
+  moveLeft?: boolean;
+  moveRight?: boolean;
+  jumpTick?: number; // increases by +1 per tap
 };
 
 type Obstacle = { x: number; y: number; w: number; h: number; vx: number; type: 'rat' | 'poop' };
@@ -21,10 +25,27 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-export default function MiniGame({ character, title = 'Paris Run', onDone }: Props) {
+export default function MiniGame({
+  character,
+  title = 'Paris Run',
+  onDone,
+  moveLeft,
+  moveRight,
+  jumpTick,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const cvsRef = useRef<HTMLCanvasElement | null>(null);
   const initedRef = useRef(false);
+
+  // Refs mirroring props so we can read latest values inside the running loop
+  const leftRef = useRef<boolean | undefined>(moveLeft);
+  const rightRef = useRef<boolean | undefined>(moveRight);
+  const jumpTickRef = useRef<number | undefined>(jumpTick);
+  const lastJumpRef = useRef<number>(-1);
+
+  useEffect(() => { leftRef.current = moveLeft; }, [moveLeft]);
+  useEffect(() => { rightRef.current = moveRight; }, [moveRight]);
+  useEffect(() => { jumpTickRef.current = jumpTick; }, [jumpTick]);
 
   useEffect(() => {
     // éviter la double init (StrictMode)
@@ -91,7 +112,7 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
     let startCountdown = START_DELAY;
     let finishReason: 'rat' | 'time' | null = null;
 
-    // --- Entrées
+    // --- Entrées (clavier de base)
     const keys = { left: false, right: false, wantJump: false };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'ArrowLeft')  keys.left = true;
@@ -101,12 +122,29 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'ArrowLeft')  keys.left = false;
       if (e.code === 'ArrowRight') keys.right = false;
-      // pas besoin de remetre wantJump à false ici (on consommera dans step)
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     const onPointer = () => { keys.wantJump = true; };
     cvs.addEventListener('pointerdown', onPointer, { passive: true });
+
+    // --- Merge inputs (keyboard + overlay props) ---
+    function readInputsFromProps() {
+      // start from live keyboard state
+      const input = { left: keys.left, right: keys.right, jump: false };
+
+      // override with overlay pad if provided
+      if (typeof leftRef.current === 'boolean')  input.left  = leftRef.current;
+      if (typeof rightRef.current === 'boolean') input.right = rightRef.current;
+
+      // convert jumpTick edge to a one-frame jump pulse
+      if (typeof jumpTickRef.current === 'number' && jumpTickRef.current !== lastJumpRef.current) {
+        input.jump = true;
+        lastJumpRef.current = jumpTickRef.current;
+      }
+
+      return input;
+    }
 
     // --- Spawns protégés ---
     const rnd = (a: number, b: number) => a + Math.random() * (b - a);
@@ -118,7 +156,6 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
     }
 
     function trySpawn(dt: number) {
-      // pas de spawn pendant le START_DELAY
       if (startCountdown > 0) return;
 
       spawnAcc += dt;
@@ -231,7 +268,6 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
         ctx.fillText(finishReason === 'rat' ? 'Aïe !' : 'BRAVO !', CSS_W / 2, CSS_H / 2 - 12);
         ctx.font = '18px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
         ctx.fillText(`Score: ${score}`, CSS_W / 2, CSS_H / 2 + 18);
-        // mini debug
         if (finishReason) ctx.fillText(`(raison: ${finishReason})`, CSS_W / 2, CSS_H / 2 + 42);
         ctx.textAlign = 'start';
       }
@@ -256,12 +292,15 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
         return;
       }
 
-      // saut (consommation)
-      if (keys.wantJump && player.grounded) {
+      // merge inputs (overlay + keyboard)
+      const inputs = readInputsFromProps();
+
+      // saut (one-shot from either overlay or keyboard)
+      if ((inputs.jump || keys.wantJump) && player.grounded) {
         player.vy = -jumpV;
         player.grounded = false;
       }
-      keys.wantJump = false;
+      keys.wantJump = false; // consume keyboard request
 
       // vertical
       player.vy += gravity * STEP;
@@ -274,8 +313,8 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
 
       // horizontal (accélération + friction), ralenti par "slow"
       let ax = 0;
-      if (keys.left)  ax -= accelX;
-      if (keys.right) ax += accelX;
+      if (inputs.left)  ax -= accelX;
+      if (inputs.right) ax += accelX;
 
       if (ax === 0) {
         if (player.vx > 0) player.vx = Math.max(0, player.vx - frictionX * STEP);
@@ -295,11 +334,10 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       for (const o of obs)   o.x += (o.vx * slow) * STEP;
       for (const c of coins) c.x += (c.vx * slow) * STEP;
 
-      // collisions (uniquement après le START_DELAY)
+      // collisions
       for (const o of obs) {
         if (aabb(player, { x: o.x, y: o.y, w: o.w, h: o.h })) {
           if (o.type === 'rat') { finish('rat'); return; }
-          // caca → ralentit un peu
           slow = 0.55; setTimeout(() => (slow = 1), 650);
           o.x = -9999;
         }
@@ -350,6 +388,7 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       if (cvs.parentElement === host) host.removeChild(cvs);
       cvsRef.current = null;
     };
+  // NOTE: don't include moveLeft/moveRight/jumpTick here, we read them via refs
   }, [character, title, onDone]);
 
   return (
