@@ -20,48 +20,70 @@ export default function MiniGameOverlay({
   const [right, setRight] = useState(false);
   const [jumpTick, setJumpTick] = useState(0);
 
-  // helpers pour gérer press/release à la fois mouse et touch
+  // utils: bloque propagation + default pour éviter tout "clic" sur le canvas / page
+  const swallow = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
   const press =
     (fn: (v: boolean) => void, v: boolean) =>
     (e: React.MouseEvent | React.TouchEvent) => {
-      e.preventDefault();
+      swallow(e);
       fn(v);
     };
 
-  const release = (fn: (v: boolean) => void) => (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    fn(false);
-  };
+  const release =
+    (fn: (v: boolean) => void) =>
+    (e: React.MouseEvent | React.TouchEvent) => {
+      swallow(e);
+      fn(false);
+    };
 
   const doJump = (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    setJumpTick((t) => t + 1);
+    swallow(e);
+    setJumpTick((t) => t + 1); // edge trigger
   };
 
   return (
-    <div className="overlay" role="dialog" aria-modal="true">
+    <div
+      className="overlay"
+      role="dialog"
+      aria-modal="true"
+      // évite que les flèches/space scrollent la page sous iOS
+      onKeyDown={(e) => {
+        if (
+          e.code === "ArrowLeft" ||
+          e.code === "ArrowRight" ||
+          e.code === "ArrowUp" ||
+          e.code === "Space"
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }}
+    >
       <div className="overlay-card" style={{ width: "min(760px, 96vw)", position: "relative" }}>
         <div className="overlay-head" style={{ marginBottom: 8 }}>
           <b>{title}</b>
-          <button onClick={onClose} aria-label="Fermer">✕</button>
+          <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClose(); }} aria-label="Fermer">✕</button>
         </div>
 
-        {/* Aire de jeu : occupe toute la carte de l’overlay-card */}
+        {/* Aire de jeu */}
         <div style={{ position: "relative", width: "100%", height: "min(70vh, 520px)" }}>
           <MiniGame
             character={character}
             title={title}
-            onDone={(r) => {
-              onResult(r);
-              onClose();
-            }}
-            // ⬇️ commandes tactiles
+            onDone={(r) => { onResult(r); onClose(); }}
+            // commandes tactiles
             moveLeft={left}
             moveRight={right}
             jumpTick={jumpTick}
+            // IMPORTANT: on désactive le tap-to-jump du canvas
+            enableTouchJump={false}
           />
 
-          {/* PAD TACTILE — rangée gauche/droite + saut */}
+          {/* PAD TACTILE */}
           <div
             aria-hidden
             style={{
@@ -71,7 +93,7 @@ export default function MiniGameOverlay({
               alignItems: "flex-end",
               justifyContent: "space-between",
               padding: 12,
-              pointerEvents: "none", // on réactive par bouton
+              pointerEvents: "none",
             }}
           >
             {/* Gauche/Droite */}
