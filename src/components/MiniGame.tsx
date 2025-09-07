@@ -5,16 +5,18 @@ type Props = {
   character: 'kiki' | 'toby';
   title?: string;
   onDone: (res: { won: boolean; score: number; time: number }) => void;
-  // NEW: inputs from MiniGameOverlay (optional)
+
+  // Commandes tactiles (venues de MiniGameOverlay)
   moveLeft?: boolean;
   moveRight?: boolean;
-  jumpTick?: number; // increases by +1 per tap
+  /** Incrémente de +1 à chaque appui sur le bouton Saut */
+  jumpTick?: number;
 };
 
 type Obstacle = { x: number; y: number; w: number; h: number; vx: number; type: 'rat' | 'poop' };
 type Collectible = { x: number; y: number; r: number; vx: number };
 
-// ---- utils
+// --- util: chargement d’image
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -37,25 +39,24 @@ export default function MiniGame({
   const cvsRef = useRef<HTMLCanvasElement | null>(null);
   const initedRef = useRef(false);
 
-  // Refs mirroring props so we can read latest values inside the running loop
-  const leftRef = useRef<boolean | undefined>(moveLeft);
-  const rightRef = useRef<boolean | undefined>(moveRight);
-  const jumpTickRef = useRef<number | undefined>(jumpTick);
-  const lastJumpRef = useRef<number>(-1);
+  // Refs pour lire les props “live” dans la boucle
+  const leftRef = useRef(moveLeft);
+  const rightRef = useRef(moveRight);
+  const jumpTickRef = useRef(jumpTick);
+  const lastJumpSeen = useRef(-1);
 
   useEffect(() => { leftRef.current = moveLeft; }, [moveLeft]);
   useEffect(() => { rightRef.current = moveRight; }, [moveRight]);
   useEffect(() => { jumpTickRef.current = jumpTick; }, [jumpTick]);
 
   useEffect(() => {
-    // éviter la double init (StrictMode)
-    if (initedRef.current) return;
+    if (initedRef.current) return; // évite double init (StrictMode)
     initedRef.current = true;
 
     const host = hostRef.current;
     if (!host) return;
 
-    // --- Canvas HiDPI ---
+    // --- Canvas HiDPI
     const rect = host.getBoundingClientRect();
     const CSS_W = Math.max(240, Math.floor(rect.width));
     const CSS_H = Math.max(200, Math.floor(rect.height));
@@ -63,7 +64,7 @@ export default function MiniGame({
 
     const cvs = document.createElement('canvas');
     cvsRef.current = cvs;
-    cvs.width  = Math.floor(CSS_W * DPR);
+    cvs.width = Math.floor(CSS_W * DPR);
     cvs.height = Math.floor(CSS_H * DPR);
     Object.assign(cvs.style, {
       display: 'block',
@@ -80,23 +81,25 @@ export default function MiniGame({
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     (ctx as any).imageSmoothingEnabled = true;
 
-    // --- Fond image (Panthéon si demandé) ---
+    // --- Fond image
     const base = import.meta.env.BASE_URL || '/';
     const wantsPantheon = title.toLowerCase().includes('panthéon');
     const bgURL = wantsPantheon ? `${base}img/bg/pantheon.PNG` : '';
     let bgImage: HTMLImageElement | null = null;
     if (bgURL) loadImage(bgURL).then(i => (bgImage = i)).catch(() => (bgImage = null));
 
-    // --- Constantes gameplay (adoucies) ---
+    // --- Constantes gameplay
     const groundY     = Math.floor(CSS_H * 0.80);
     const gravity     = 1500;
     const jumpV       = 540;
-    const accelX      = 1200;
-    const frictionX   = 900;
-    const maxVx       = 220;
-    const worldSpeed  = 170;     // moins rapide
-    const DURATION    = 20;      // secondes de jeu
-    const START_DELAY = 0.8;     // protection départ (sec)
+    const accelX      = 1000;
+    const frictionX   = 800;
+    const maxVx       = 210;
+    const worldSpeed  = 160;
+    const DURATION    = 20;
+    const START_DELAY = 0.8;     // pas de mouvement monde / pas de collision au départ
+    const INVINCIBLE_AFTER_START = 1.0; // invincibilité supplémentaire (sécurité)
+    const DEBUG = false;         // passe à true pour voir les chiffres
 
     const bodyColor = character === 'kiki' ? '#FFB84D' : '#5E93FF';
 
@@ -106,13 +109,14 @@ export default function MiniGame({
     const coins: Collectible[] = [];
 
     let score = 0;
-    let elapsed = 0;       // temps réel de jeu (n’est PAS ralenti)
+    let elapsed = 0;
     let alive = true;
-    let slow = 1;          // 0.5 quand caca pigeon, remonte à 1 ensuite
+    let slow = 1;
     let startCountdown = START_DELAY;
+    let noFailTimer = START_DELAY + INVINCIBLE_AFTER_START; // invincibilité de confort
     let finishReason: 'rat' | 'time' | null = null;
 
-    // --- Entrées (clavier de base)
+    // --- Entrées (clavier)
     const keys = { left: false, right: false, wantJump: false };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'ArrowLeft')  keys.left = true;
@@ -125,35 +129,35 @@ export default function MiniGame({
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
-    const onPointer = () => { keys.wantJump = true; };
-    cvs.addEventListener('pointerdown', onPointer, { passive: true });
 
-    // --- Merge inputs (keyboard + overlay props) ---
-    function readInputsFromProps() {
-      // start from live keyboard state
+    // ⚠️ On NE met plus de pointerdown sur le canvas.
+    // Le saut sur mobile vient du bouton overlay (jumpTick).
+
+    // Fusionne clavier + overlay
+    function readInputs() {
       const input = { left: keys.left, right: keys.right, jump: false };
 
-      // override with overlay pad if provided
-      if (typeof leftRef.current === 'boolean')  input.left  = leftRef.current;
-      if (typeof rightRef.current === 'boolean') input.right = rightRef.current;
+      if (typeof leftRef.current === 'boolean')  input.left  = !!leftRef.current;
+      if (typeof rightRef.current === 'boolean') input.right = !!rightRef.current;
 
-      // convert jumpTick edge to a one-frame jump pulse
-      if (typeof jumpTickRef.current === 'number' && jumpTickRef.current !== lastJumpRef.current) {
+      // saut “edge triggered” via jumpTick
+      if (typeof jumpTickRef.current === 'number' && jumpTickRef.current !== lastJumpSeen.current) {
         input.jump = true;
-        lastJumpRef.current = jumpTickRef.current;
+        lastJumpSeen.current = jumpTickRef.current;
+      }
+
+      // petit bonus: si on commence à bouger pour la 1ère fois, prolonge l’invincibilité un peu
+      if ((input.left || input.right || input.jump) && elapsed < 2) {
+        noFailTimer = Math.max(noFailTimer, 0.4);
       }
 
       return input;
     }
 
-    // --- Spawns protégés ---
+    // --- Spawns
     const rnd = (a: number, b: number) => a + Math.random() * (b - a);
     let spawnAcc = 0;
-
-    function safeSpawnZoneX() {
-      // zone protégée devant le joueur (pas de spawn dedans)
-      return player.x + player.w + 24;
-    }
+    const safeSpawnX = () => player.x + player.w + 24;
 
     function trySpawn(dt: number) {
       if (startCountdown > 0) return;
@@ -165,32 +169,23 @@ export default function MiniGame({
       const r = Math.random();
       if (r < 0.40) {
         const w = 28, h = 22;
-        const x = CSS_W + 40;
-        const y = groundY - h;
-        if (x > safeSpawnZoneX() + 40) {
-          obs.push({ x, y, w, h, vx: -(worldSpeed + rnd(10, 50)), type: 'rat' });
-        }
+        const x = CSS_W + 40, y = groundY - h;
+        if (x > safeSpawnX() + 40) obs.push({ x, y, w, h, vx: -(worldSpeed + rnd(10, 50)), type: 'rat' });
       } else if (r < 0.70) {
         const w = 18, h = 10;
-        const x = CSS_W + 40;
-        const y = groundY - h;
-        if (x > safeSpawnZoneX() + 40) {
-          obs.push({ x, y, w, h, vx: -(worldSpeed + rnd(0, 30)), type: 'poop' });
-        }
+        const x = CSS_W + 40, y = groundY - h;
+        if (x > safeSpawnX() + 40) obs.push({ x, y, w, h, vx: -(worldSpeed + rnd(0, 30)), type: 'poop' });
       } else {
         const r2 = 8;
-        const x = CSS_W + 40;
-        const y = groundY - rnd(60, 140);
-        if (x > safeSpawnZoneX() + 40) {
-          coins.push({ x, y, r: r2, vx: -(worldSpeed + rnd(10, 60)) });
-        }
+        const x = CSS_W + 40, y = groundY - rnd(60, 140);
+        if (x > safeSpawnX() + 40) coins.push({ x, y, r: r2, vx: -(worldSpeed + rnd(10, 60)) });
       }
 
       if (obs.length > 12)   obs.splice(0, obs.length - 12);
       if (coins.length > 10) coins.splice(0, coins.length - 10);
     }
 
-    // --- Collisions ---
+    // --- Collisions
     const aabb = (a:{x:number;y:number;w:number;h:number}, b:{x:number;y:number;w:number;h:number}) =>
       a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
@@ -201,7 +196,7 @@ export default function MiniGame({
       return dx*dx + dy*dy < r*r;
     };
 
-    // --- Rendu ---
+    // --- Rendu
     function draw() {
       // fond
       if (bgImage) {
@@ -247,7 +242,17 @@ export default function MiniGame({
       ctx.fillText(String(score), CSS_W - 160, 26);
       ctx.fillText(Math.max(0, DURATION - elapsed).toFixed(1), CSS_W - 80, 26);
 
-      // message départ
+      if (DEBUG) {
+        ctx.fillStyle = 'rgba(0,0,0,.45)';
+        ctx.fillRect(10, 40, 170, 58);
+        ctx.fillStyle = '#fff';
+        ctx.font = '12px ui-monospace, Menlo, Consolas, monospace';
+        ctx.fillText(`obs:${obs.length} coins:${coins.length}`, 16, 58);
+        ctx.fillText(`noFail:${noFailTimer.toFixed(2)}s`, 16, 74);
+        ctx.fillText(`vx:${player.vx.toFixed(1)}`, 16, 90);
+      }
+
+      // overlay départ
       if (startCountdown > 0) {
         ctx.fillStyle = 'rgba(0,0,0,.45)';
         ctx.fillRect(0, 0, CSS_W, CSS_H);
@@ -268,12 +273,11 @@ export default function MiniGame({
         ctx.fillText(finishReason === 'rat' ? 'Aïe !' : 'BRAVO !', CSS_W / 2, CSS_H / 2 - 12);
         ctx.font = '18px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
         ctx.fillText(`Score: ${score}`, CSS_W / 2, CSS_H / 2 + 18);
-        if (finishReason) ctx.fillText(`(raison: ${finishReason})`, CSS_W / 2, CSS_H / 2 + 42);
         ctx.textAlign = 'start';
       }
     }
 
-    // --- Boucle fixe 60 FPS ---
+    // --- Boucle fixe 60 FPS
     const STEP = 1 / 60;
     const MAX_FRAME = 0.10;
     let acc = 0;
@@ -286,21 +290,19 @@ export default function MiniGame({
     }
 
     function stepOnce() {
-      // protection départ
-      if (startCountdown > 0) {
-        startCountdown = Math.max(0, startCountdown - STEP);
-        return;
-      }
+      // timers de protection
+      if (startCountdown > 0) startCountdown = Math.max(0, startCountdown - STEP);
+      if (noFailTimer > 0)   noFailTimer   = Math.max(0, noFailTimer   - STEP);
 
-      // merge inputs (overlay + keyboard)
-      const inputs = readInputsFromProps();
+      // Entrées fusionnées
+      const inputs = readInputs();
 
-      // saut (one-shot from either overlay or keyboard)
-      if ((inputs.jump || keys.wantJump) && player.grounded) {
+      // saut
+      if ((inputs.jump || keys.wantJump) && player.grounded && startCountdown <= 0) {
         player.vy = -jumpV;
         player.grounded = false;
       }
-      keys.wantJump = false; // consume keyboard request
+      keys.wantJump = false;
 
       // vertical
       player.vy += gravity * STEP;
@@ -311,7 +313,7 @@ export default function MiniGame({
         player.grounded = true;
       }
 
-      // horizontal (accélération + friction), ralenti par "slow"
+      // horizontal (adouci)
       let ax = 0;
       if (inputs.left)  ax -= accelX;
       if (inputs.right) ax += accelX;
@@ -320,40 +322,47 @@ export default function MiniGame({
         if (player.vx > 0) player.vx = Math.max(0, player.vx - frictionX * STEP);
         if (player.vx < 0) player.vx = Math.min(0, player.vx + frictionX * STEP);
       } else {
-        player.vx += (ax * slow) * STEP;
+        player.vx += ax * STEP;
       }
+
       if (player.vx >  maxVx) player.vx =  maxVx;
       if (player.vx < -maxVx) player.vx = -maxVx;
-      player.x += (player.vx * slow) * STEP;
+
+      player.x += (player.vx * (slow)) * STEP;
 
       // limites écran
       if (player.x < 8) { player.x = 8; player.vx = 0; }
       if (player.x > CSS_W - player.w - 8) { player.x = CSS_W - player.w - 8; player.vx = 0; }
 
-      // monde qui défile (ralenti si slow)
-      for (const o of obs)   o.x += (o.vx * slow) * STEP;
-      for (const c of coins) c.x += (c.vx * slow) * STEP;
-
-      // collisions
-      for (const o of obs) {
-        if (aabb(player, { x: o.x, y: o.y, w: o.w, h: o.h })) {
-          if (o.type === 'rat') { finish('rat'); return; }
-          slow = 0.55; setTimeout(() => (slow = 1), 650);
-          o.x = -9999;
-        }
+      // monde
+      if (startCountdown <= 0) {
+        for (const o of obs)   o.x += (o.vx * slow) * STEP;
+        for (const c of coins) c.x += (c.vx * slow) * STEP;
       }
-      for (const c of coins) {
-        if (rectCircle(player.x, player.y, player.w, player.h, c.x, c.y, c.r)) { score += 1; c.x = -9999; }
+
+      // collisions (ignorées tant que noFailTimer > 0)
+      if (startCountdown <= 0) {
+        for (const o of obs) {
+          if (aabb(player, { x: o.x, y: o.y, w: o.w, h: o.h })) {
+            if (noFailTimer <= 0 && o.type === 'rat') { finish('rat'); return; }
+            if (o.type !== 'rat') {
+              slow = 0.6; setTimeout(() => (slow = 1), 600);
+              o.x = -9999;
+            }
+          }
+        }
+        for (const c of coins) {
+          if (rectCircle(player.x, player.y, player.w, player.h, c.x, c.y, c.r)) { score += 1; c.x = -9999; }
+        }
       }
 
       // purge
       while (obs.length && obs[0].x < -100)   obs.shift();
       while (coins.length && coins[0].x < -80) coins.shift();
 
-      // spawns
       trySpawn(STEP);
 
-      // temps (toujours réel, pas ralenti)
+      // temps réel
       elapsed += STEP;
       if (elapsed >= DURATION) { finish('time'); return; }
     }
@@ -376,19 +385,17 @@ export default function MiniGame({
       if (alive) requestAnimationFrame(loop);
     }
 
-    // kick
     draw();
     requestAnimationFrame(loop);
 
-    // --- Cleanup ---
+    // --- Cleanup
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
-      cvs.removeEventListener('pointerdown', onPointer);
       if (cvs.parentElement === host) host.removeChild(cvs);
       cvsRef.current = null;
     };
-  // NOTE: don't include moveLeft/moveRight/jumpTick here, we read them via refs
+  // on ne redémarre pas sur moveLeft/moveRight/jumpTick (lus via refs)
   }, [character, title, onDone]);
 
   return (
