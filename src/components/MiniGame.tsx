@@ -86,11 +86,19 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
     const duration = 20;
     let slowFactor = 1;
 
-    const player = { x: 80, y: groundY - 36, w: 36, h: 36, vy: 0, grounded: true };
+    // ⬇️ joueur avec déplacement horizontal
+    const player = {
+      x: 80, y: groundY - 36, w: 36, h: 36,
+      vy: 0,                 // vitesse verticale
+      vx: 0,                 // vitesse horizontale instantanée
+      speed: 240,            // vitesse max (réglable)
+      grounded: true,
+    };
+
     const obs: Obstacle[] = [];
     const coins: Collectible[] = [];
 
-    // Inputs
+    // ---- Inputs
     const jump = () => {
       if (!alive) return;
       if (player.grounded) {
@@ -98,14 +106,30 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
         player.grounded = false;
       }
     };
+
+    // flags de déplacement (clavier)
+    let movingLeft = false;
+    let movingRight = false;
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'Space' || e.code === 'ArrowUp') jump();
+      const down = e.type === 'keydown';
+      if (e.code === 'Space' || e.code === 'ArrowUp') {
+        if (down) jump();
+      } else if (e.code === 'ArrowLeft') {
+        movingLeft = down;
+      } else if (e.code === 'ArrowRight') {
+        movingRight = down;
+      }
     };
+
+    // clic/tap = saut (pour mobile)
     const onPointer = () => jump();
+
     window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKey);
     cvs.addEventListener('pointerdown', onPointer, { passive: true });
 
-    // Spawns
+    // ---- Spawns
     const rnd = (a: number, b: number) => a + Math.random() * (b - a);
     const spawnRat = () => {
       const w = 28, h = 22;
@@ -132,7 +156,7 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       }
     };
 
-    // Collisions
+    // ---- Collisions
     const aabb = (a:{x:number;y:number;w:number;h:number}, b:{x:number;y:number;w:number;h:number}) =>
       a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
@@ -143,9 +167,9 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       return dx*dx + dy*dy < r*r;
     };
 
-    // Rendu
+    // ---- Rendu
     const clear = () => {
-      // Fond image si dispo (cover)
+      // Fond image (cover)
       if (bgImage) {
         const cw = W, ch = H;
         const iw = bgImage.width, ih = bgImage.height;
@@ -155,8 +179,8 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
         else { dw = cw; dh = dw / ir; dx = 0; dy = (ch - dh) / 2; }
         ctx.drawImage(bgImage, dx, dy, dw, dh);
       } else {
-        // fallback
-        ctx.fillStyle = '#0e1320'; ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#0e1320';
+        ctx.fillRect(0, 0, W, H);
       }
 
       // HUD
@@ -206,12 +230,13 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
       setTimeout(() => onDone({ won, score, time: Math.min(duration, elapsed) }), 800);
     };
 
+    // ---- Boucle jeu
     const step = (dt: number) => {
       if (!alive) return;
 
       elapsed += dt;
 
-      // Joueur
+      // Physique verticale (gravité / saut)
       player.vy += gravity * dt;
       player.y += player.vy * dt;
       if (player.y >= groundY - player.h) {
@@ -219,6 +244,14 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
         player.vy = 0;
         player.grounded = true;
       }
+
+      // Mouvement horizontal (clavier)
+      player.vx = (movingRight ? player.speed : 0) - (movingLeft ? player.speed : 0);
+      player.x += player.vx * dt;
+
+      // Limites écran
+      if (player.x < 8) player.x = 8;
+      if (player.x > W - player.w - 8) player.x = W - player.w - 8;
 
       // Monde
       for (const o of obs) o.x += o.vx * dt;
@@ -232,7 +265,9 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
         }
       }
       for (const c of coins) {
-        if (rectCircle(player.x, player.y, player.w, player.h, c.x, c.y, c.r)) { score += 1; c.x = -9999; }
+        if (rectCircle(player.x, player.y, player.w, player.h, c.x, c.y, c.r)) {
+          score += 1; c.x = -9999;
+        }
       }
 
       // Purge
@@ -261,13 +296,16 @@ export default function MiniGame({ character, title = 'Paris Run', onDone }: Pro
     rafRef.current = requestAnimationFrame(frame);
 
     // Fallback en cas de throttle iOS (onglet inactif)
-    intRef.current = window.setInterval(() => { if (alive) step((1/60) * slowFactor); }, 1000/60) as unknown as number;
+    intRef.current = window.setInterval(() => {
+      if (alive) step((1/60) * slowFactor);
+    }, 1000/60) as unknown as number;
 
     // Cleanup
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (intRef.current) clearInterval(intRef.current);
       window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKey);
       cvs.removeEventListener('pointerdown', onPointer);
       if (cvs.parentElement === host) host.removeChild(cvs);
       cvsRef.current = null;
