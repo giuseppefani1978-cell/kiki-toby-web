@@ -95,12 +95,26 @@ export default function MiniGame({
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     (ctx as any).imageSmoothingEnabled = true;
 
-    // Fond image (Panthéon si demandé)
+    // Fond(s) image(s)
     const base = import.meta.env.BASE_URL || '/';
     const wantsPantheon = title.toLowerCase().includes('panthéon');
     const bgURL = wantsPantheon ? `${base}img/bg/pantheon.PNG` : '';
     let bgImage: HTMLImageElement | null = null;
     if (bgURL) loadImage(bgURL).then(i => (bgImage = i)).catch(() => (bgImage = null));
+
+    // 👇 NEW: scrolling tiles (uppercase .PNG)
+    const tilesToLoad = [
+      wantsPantheon ? `${base}img/bg/pantheon.PNG` : `${base}img/bg/street_A.PNG`,
+      `${base}img/bg/street_A.PNG`,
+      `${base}img/bg/street_B.PNG`,
+    ];
+    const bgTiles: HTMLImageElement[] = [];
+    Promise.all(
+      tilesToLoad.map(p => loadImage(p).then(img => { bgTiles.push(img); return img; }).catch(() => null))
+    ).catch(() => { /* ignore */ });
+
+    // parallax state
+    let bgScrollX = 0;
 
     // Constantes gameplay
     const groundY     = Math.floor(CSS_H * 0.80);
@@ -196,21 +210,69 @@ export default function MiniGame({
       return dx*dx + dy*dy < r*r;
     };
 
+    // 👇 NEW: scrolling background drawer
+    function drawScrollingBackground() {
+      const h = groundY; // draw the background up to ground line
+      const y = 0;
+
+      // If we don't have tiles yet, fall back to the single bgImage logic
+      if (!bgTiles.length) {
+        if (bgImage) {
+          const cw = CSS_W, ch = h;
+          const iw = bgImage.width, ih = bgImage.height;
+          const cr = cw / ch, ir = iw / ih;
+          let dw = cw, dh = ch, dx = 0, dy = 0;
+          if (ir > cr) { dh = ch; dw = dh * ir; dx = (cw - dw) / 2; }
+          else { dw = cw; dh = dw / ir; dy = (ch - dh) / 2; }
+          ctx.drawImage(bgImage, dx, dy, dw, dh);
+        } else {
+          ctx.fillStyle = '#0e1320';
+          ctx.fillRect(0, 0, CSS_W, h);
+        }
+        return;
+      }
+
+      // Parallax factor: <1 so it drifts more slowly than obstacles
+      const factor = 0.6;
+
+      // helper to draw a tile scaled to height h
+      const tileH = h;
+      const drawTile = (img: HTMLImageElement, dx: number) => {
+        const s = tileH / img.height;
+        const dw = Math.ceil(img.width * s);
+        ctx.drawImage(img, dx, y, dw, tileH);
+        return dw;
+      };
+
+      // We won't try to be perfect with modulo on variable widths; just shift by CSS_W.
+      const off = (bgScrollX * factor) % CSS_W;
+      let x = -off - CSS_W; // start a bit before the screen
+      let drawn = 0;
+
+      while (x < CSS_W + CSS_W && drawn < 12) {
+        const idx = Math.floor((bgScrollX * factor) / CSS_W) + drawn;
+
+        let img: HTMLImageElement;
+        if (wantsPantheon && idx < 3 && bgTiles[0]) {
+          // first 3 panels: Pantheon
+          img = bgTiles[0];
+        } else {
+          // alternate street_A / street_B afterwards
+          // bgTiles[1] -> street_A, bgTiles[2] -> street_B (fallback chain)
+          const alt = (idx - 3) % 2;
+          img = bgTiles[1 + (alt === 0 ? 0 : 1)] || bgTiles[1] || bgTiles[0];
+        }
+
+        const dw = drawTile(img, x);
+        x += dw;
+        drawn++;
+      }
+    }
+
     // Rendu
     function draw() {
-      // fond
-      if (bgImage) {
-        const cw = CSS_W, ch = CSS_H;
-        const iw = bgImage.width, ih = bgImage.height;
-        const cr = cw / ch, ir = iw / ih;
-        let dw = cw, dh = ch, dx = 0, dy = 0;
-        if (ir > cr) { dh = ch; dw = dh * ir; dx = (cw - dw) / 2; }
-        else { dw = cw; dh = dw / ir; dy = (ch - dh) / 2; }
-        ctx.drawImage(bgImage, dx, dy, dw, dh);
-      } else {
-        ctx.fillStyle = '#0e1320';
-        ctx.fillRect(0, 0, CSS_W, CSS_H);
-      }
+      // fond défilant jusqu'au sol
+      drawScrollingBackground();
 
       // sol
       ctx.fillStyle = 'rgba(31,41,55,.85)';
@@ -321,6 +383,9 @@ export default function MiniGame({
       // limites
       if (player.x < 8) { player.x = 8; player.vx = 0; }
       if (player.x > CSS_W - player.w - 8) { player.x = CSS_W - player.w - 8; player.vx = 0; }
+
+      // 👇 NEW: advance background scroll each step (slowed by poop)
+      bgScrollX += (worldSpeed * slow) * STEP;
 
       // monde (défilement simple)
       for (const o of obs)   o.x += o.vx * STEP;
