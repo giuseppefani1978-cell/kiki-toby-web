@@ -8,13 +8,13 @@ type Props = {
   title?: string;
   onDone: (res: Result) => void;
 
-  // external controls from MiniGameOverlay
+  // commandes externes (depuis l’overlay)
   moveLeft?: boolean;
   moveRight?: boolean;
-  /** incremented on each Jump press (edge trigger) */
+  /** incrémenté à chaque appui Saut (edge trigger) */
   jumpTick?: number;
 
-  /** enable tap-to-jump directly on the canvas (default true) */
+  /** autoriser le “tap to jump” directement sur le canvas (par défaut true) */
   enableTouchJump?: boolean;
 };
 
@@ -44,12 +44,12 @@ export default function MiniGame({
   const hostRef = useRef<HTMLDivElement>(null);
   const cvsRef  = useRef<HTMLCanvasElement | null>(null);
 
-  // ⛑ keep latest onDone without retriggering the main effect
+  // garder la dernière version de onDone sans relancer l’effet principal
   const onDoneRef = useRef(onDone);
   useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
 
-  // external controls mirrored in refs (visible inside the loop)
-  const controlsRef = useRef({ left: !!moveLeft, right: !!moveRight, jumpTick: jumpTick ?? 0 });
+  // commandes externes visibles dans la boucle
+  const controlsRef   = useRef({ left: !!moveLeft, right: !!moveRight, jumpTick: jumpTick ?? 0 });
   const wantJumpRef   = useRef(false);
   const invulnBumpRef = useRef(0);
 
@@ -65,12 +65,12 @@ export default function MiniGame({
   }, [moveLeft, moveRight, jumpTick]);
 
   useEffect(() => {
-    // ---------- RUN ONCE (DO NOT DEPEND ON onDone OR PAD STATES) ----------
+    // ---------- run once ----------
     const host = hostRef.current;
     if (!host) return;
 
-    // --- Canvas HiDPI ---
-    const rect = host.getBoundingClientRect();
+    // Canvas HiDPI
+    const rect  = host.getBoundingClientRect();
     const CSS_W = Math.max(240, Math.floor(rect.width));
     const CSS_H = Math.max(200, Math.floor(rect.height));
     const DPR   = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
@@ -95,13 +95,14 @@ export default function MiniGame({
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     (ctx as any).imageSmoothingEnabled = true;
 
-    // --- Static params captured at mount (that’s fine for this mini-scene)
+    // Fond image (Panthéon si demandé)
     const base = import.meta.env.BASE_URL || '/';
     const wantsPantheon = title.toLowerCase().includes('panthéon');
     const bgURL = wantsPantheon ? `${base}img/bg/pantheon.PNG` : '';
     let bgImage: HTMLImageElement | null = null;
     if (bgURL) loadImage(bgURL).then(i => (bgImage = i)).catch(() => (bgImage = null));
 
+    // Constantes gameplay
     const groundY     = Math.floor(CSS_H * 0.80);
     const gravity     = 1500;
     const jumpV       = 540;
@@ -109,12 +110,14 @@ export default function MiniGame({
     const frictionX   = 900;
     const maxVx       = 220;
     const worldSpeed  = 170;
-    const DURATION    = 20;
-    const START_DELAY = 0.8;
+    const DURATION    = 20;      // durée du run (en s)
+    const START_DELAY = 0.8;     // protection départ
+    const MAX_HP      = 3;       // ❤❤❤
+    const HIT_IFRAMES = 1.0;     // invulnérabilité après un coup (s)
 
     const bodyColor = character === 'kiki' ? '#FFB84D' : '#5E93FF';
 
-    // --- State
+    // État
     const player = { x: 80, y: groundY - 36, w: 36, h: 36, vx: 0, vy: 0, grounded: true };
     const obs: Obstacle[] = [];
     const coins: Collectible[] = [];
@@ -124,10 +127,11 @@ export default function MiniGame({
     let alive = true;
     let slow = 1;
     let startCountdown = START_DELAY;
-    let invuln = START_DELAY;
+    let invuln = START_DELAY; // invuln au départ
+    let hp = MAX_HP;
     let finishReason: 'rat' | 'time' | null = null;
 
-    // --- Keyboard (desktop)
+    // Clavier (desktop)
     const keys = { left: false, right: false };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'ArrowLeft')  keys.left = true;
@@ -145,7 +149,7 @@ export default function MiniGame({
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
-    // --- Tap-to-jump on canvas (optional)
+    // Tap-to-jump optionnel
     const onPointer = (e: PointerEvent) => {
       if (!enableTouchJump) return;
       e.preventDefault();
@@ -154,7 +158,7 @@ export default function MiniGame({
     };
     cvs.addEventListener('pointerdown', onPointer, { passive: false });
 
-    // --- Spawns ---
+    // Spawns
     const rnd = (a: number, b: number) => a + Math.random() * (b - a);
     let spawnAcc = 0;
     const safeSpawnX = () => player.x + player.w + 24;
@@ -181,7 +185,7 @@ export default function MiniGame({
       if (coins.length > 10) coins.splice(0, coins.length - 10);
     }
 
-    // --- Collisions ---
+    // Collisions
     const aabb = (a:{x:number;y:number;w:number;h:number}, b:{x:number;y:number;w:number;h:number}) =>
       a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
@@ -192,9 +196,9 @@ export default function MiniGame({
       return dx*dx + dy*dy < r*r;
     };
 
-    // --- Render (with minimal debug overlay text)
+    // Rendu
     function draw() {
-      // background
+      // fond
       if (bgImage) {
         const cw = CSS_W, ch = CSS_H;
         const iw = bgImage.width, ih = bgImage.height;
@@ -208,11 +212,11 @@ export default function MiniGame({
         ctx.fillRect(0, 0, CSS_W, CSS_H);
       }
 
-      // ground
+      // sol
       ctx.fillStyle = 'rgba(31,41,55,.85)';
       ctx.fillRect(0, groundY, CSS_W, CSS_H - groundY);
 
-      // entities
+      // entités
       for (const o of obs) {
         ctx.fillStyle = o.type === 'rat' ? '#ef4444' : '#bdbdbd';
         ctx.fillRect(o.x, o.y, o.w, o.h);
@@ -224,13 +228,15 @@ export default function MiniGame({
         ctx.fill();
       }
 
-      // player
-      ctx.fillStyle = bodyColor;
-      ctx.fillRect(player.x, player.y, player.w, player.h);
-      ctx.fillStyle = '#0b0b0b';
-      ctx.fillRect(player.x + 10, player.y + 10, 8, 8);
+      // joueur (petit clignotement si invuln)
+      if (invuln === 0 || Math.floor(performance.now() / 100) % 2 === 0) {
+        ctx.fillStyle = bodyColor;
+        ctx.fillRect(player.x, player.y, player.w, player.h);
+        ctx.fillStyle = '#0b0b0b';
+        ctx.fillRect(player.x + 10, player.y + 10, 8, 8);
+      }
 
-      // HUD
+      // HUD (titre, score, timer)
       ctx.fillStyle = 'rgba(255,255,255,.94)';
       ctx.font = '20px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
       ctx.fillText(title, 16, 28);
@@ -238,22 +244,11 @@ export default function MiniGame({
       ctx.fillText(String(score), CSS_W - 160, 26);
       ctx.fillText(Math.max(0, DURATION - elapsed).toFixed(1), CSS_W - 80, 26);
 
-      // tiny debug HUD
-      ctx.save();
-      ctx.globalAlpha = 0.8;
-      ctx.fillStyle = '#111827';
-      ctx.fillRect(12, 56, 320, 84);
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = '#e5e7eb';
-      ctx.font = '14px ui-monospace, SFMono-Regular, Menlo, monospace';
-      const left  = controlsRef.current.left  || keys.left;
-      const right = controlsRef.current.right || keys.right;
-      const jt    = controlsRef.current.jumpTick;
-      ctx.fillText(`alive=${alive} reason=${finishReason ?? '-'}`, 20, 76);
-      ctx.fillText(`left=${left} right=${right} jt=${jt}`, 20, 94);
-      ctx.fillText(`px=${player.x.toFixed(1)} py=${player.y.toFixed(1)} vx=${player.vx.toFixed(1)} vy=${player.vy.toFixed(1)}`, 20, 112);
-      ctx.restore();
+      // PV (cœurs)
+      ctx.font = '18px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+      ctx.fillText('❤'.repeat(hp), 16, 52);
 
+      // messages
       if (startCountdown > 0) {
         ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0, 0, CSS_W, CSS_H);
         ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
@@ -272,7 +267,7 @@ export default function MiniGame({
       }
     }
 
-    // --- Fixed timestep loop
+    // Boucle fixe
     const STEP = 1 / 60;
     const MAX_FRAME = 0.10;
     let acc = 0;
@@ -293,6 +288,7 @@ export default function MiniGame({
       const left  = controlsRef.current.left  || keys.left;
       const right = controlsRef.current.right || keys.right;
 
+      // saut (edge)
       if (wantJumpRef.current && player.grounded) {
         player.vy = -jumpV;
         player.grounded = false;
@@ -322,21 +318,31 @@ export default function MiniGame({
       if (player.vx < -maxVx) player.vx = -maxVx;
       player.x += player.vx * STEP;
 
-      // limits
+      // limites
       if (player.x < 8) { player.x = 8; player.vx = 0; }
       if (player.x > CSS_W - player.w - 8) { player.x = CSS_W - player.w - 8; player.vx = 0; }
 
-      // world
-      for (const o of obs)   o.x += worldSpeed * -STEP;
-      for (const c of coins) c.x += worldSpeed * -STEP;
+      // monde (défilement simple)
+      for (const o of obs)   o.x += o.vx * STEP;
+      for (const c of coins) c.x += c.vx * STEP;
 
       // collisions
-      if (startCountdown === 0 && invuln === 0) {
+      if (startCountdown === 0) {
         for (const o of obs) {
           if (aabb(player, { x: o.x, y: o.y, w: o.w, h: o.h })) {
-            if (o.type === 'rat') { finish('rat'); return; }
-            slow = 0.55; setTimeout(() => (slow = 1), 650);
-            o.x = -9999;
+            if (o.type === 'rat') {
+              // touche un rat → on perd 1 PV, i-frames, knockback léger
+              if (invuln === 0) {
+                hp -= 1;
+                invuln = HIT_IFRAMES;
+                player.vx = -120; // petit recul
+                if (hp <= 0) { finish('rat'); return; }
+              }
+            } else {
+              // caca → on ralentit un peu mais on ne perd pas de PV
+              slow = 0.55; setTimeout(() => (slow = 1), 650);
+              o.x = -9999;
+            }
           }
         }
       }
@@ -344,11 +350,14 @@ export default function MiniGame({
         if (rectCircle(player.x, player.y, player.w, player.h, c.x, c.y, c.r)) { score += 1; c.x = -9999; }
       }
 
+      // purge
       while (obs.length && obs[0].x < -100)   obs.shift();
       while (coins.length && coins[0].x < -80) coins.shift();
 
+      // spawns
       trySpawn(STEP);
 
+      // temps
       elapsed += STEP;
       if (elapsed >= DURATION) { finish('time'); return; }
     }
@@ -359,7 +368,7 @@ export default function MiniGame({
       t0 = now;
       if (dt > MAX_FRAME) dt = MAX_FRAME;
 
-      acc += dt;
+      acc += dt * slow; // “caca” ralentit légèrement la boucle de jeu
       let guard = 0;
       while (acc >= STEP && guard < 6 && alive) {
         stepOnce();
@@ -383,9 +392,8 @@ export default function MiniGame({
       if (cvs.parentElement === host) host.removeChild(cvs);
       cvsRef.current = null;
     };
-    // IMPORTANT: no pad/onDone deps here
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // 🔒 run once
+  }, []); // run once
 
   return (
     <div
