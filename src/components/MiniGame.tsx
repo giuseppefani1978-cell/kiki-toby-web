@@ -41,8 +41,14 @@ export default function MiniGame({
   const cvsRef = useRef<HTMLCanvasElement | null>(null);
   const initedRef = useRef(false);
 
-  // === DEBUG HUD ===========================================================
-  const DEBUG = true; // mets false pour désactiver
+  // === DEBUG / DIAG =========================================================
+  const DEBUG_DEFAULT = true; // Met à false si tu veux couper le HUD par défaut
+  const debugAlways = (window as any).ktDebugHUD === true;
+  const DEBUG = DEBUG_DEFAULT || debugAlways;
+
+  const holdFinishFlag = () => (window as any).ktHoldFinish === true;
+
+  // état HUD
   const dbg = useRef({
     // inputs
     left: false,
@@ -59,8 +65,9 @@ export default function MiniGame({
     px: 0, py: 0, pvx: 0, pvy: 0, grounded: true,
     // world
     obs: 0, coins: 0,
-    // last event
+    // last event / error
     last: '',
+    err: '',
   });
 
   // commandes externes synchronisées dans un ref (toujours visibles dans la boucle)
@@ -162,6 +169,7 @@ export default function MiniGame({
       px: player.x, py: player.y, pvx: player.vx, pvy: player.vy, grounded: player.grounded,
       obs: 0, coins: 0,
       last: '',
+      err: '',
     };
 
     // --- Entrées clavier (desktop) ---
@@ -223,22 +231,23 @@ export default function MiniGame({
 
     // --- Rendu ---
     function drawHUD() {
-      if (!DEBUG) return;
+      if (!(DEBUG || (window as any).ktDebugHUD)) return;
       const y0 = 46;
       const line = (i: number, s: string) => {
         ctx.fillText(s, 12, y0 + i * 14);
       };
-      ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(8, 36, 280, 160);
+      ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(8, 36, 300, 182);
       ctx.fillStyle = '#fff';
       ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 
-      line(0, `alive=${dbg.current.alive} reason=${dbg.current.reason || '-'}`);
+      line(0, `alive=${dbg.current.alive} reason=${dbg.current.reason || '-'}` + (holdFinishFlag() ? ' (hold)' : ''));
       line(1, `elapsed=${dbg.current.elapsed.toFixed(2)}  score=${dbg.current.score}`);
       line(2, `startC=${dbg.current.startCountdown.toFixed(2)}  invuln=${dbg.current.invuln.toFixed(2)}`);
       line(3, `left=${dbg.current.left}  right=${dbg.current.right}  jumpTick=${dbg.current.jumpTick}`);
       line(4, `px=${dbg.current.px.toFixed(1)} py=${dbg.current.py.toFixed(1)} vx=${dbg.current.pvx.toFixed(1)} vy=${dbg.current.pvy.toFixed(1)} g=${dbg.current.grounded}`);
       line(5, `obs=${dbg.current.obs}  coins=${dbg.current.coins}`);
       if (dbg.current.last) line(6, `last: ${dbg.current.last}`);
+      if (dbg.current.err)  { ctx.fillStyle = '#ff6b6b'; line(7, `ERROR: ${dbg.current.err}`); ctx.fillStyle = '#fff'; }
     }
 
     function draw() {
@@ -286,16 +295,7 @@ export default function MiniGame({
       ctx.fillText(String(score), CSS_W - 160, 26);
       ctx.fillText(Math.max(0, DURATION - elapsed).toFixed(1), CSS_W - 80, 26);
 
-      // message départ
-      if (startCountdown > 0) {
-        ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0, 0, CSS_W, CSS_H);
-        ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
-        ctx.font = '22px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
-        ctx.fillText('Prêt ? Appuie pour sauter !', CSS_W / 2, CSS_H / 2);
-        ctx.textAlign = 'start';
-      }
-
-      // écran fin (noir)
+      // écran fin
       if (!alive) {
         ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(0, 0, CSS_W, CSS_H);
         ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
@@ -316,18 +316,29 @@ export default function MiniGame({
     let acc = 0;
     let t0 = performance.now() / 1000;
 
-    function finish(reason: 'rat' | 'time') {
+    function reallyFinish(reason: 'rat' | 'time') {
       if (!alive) return;
       alive = false;
       finishReason = reason;
       dbg.current.alive = false;
       dbg.current.reason = reason;
       dbg.current.last = `finish(${reason})`;
-      if (DEBUG) console.log('[MiniGame] finish reason =', reason);
+      console.log('[MiniGame] finish reason =', reason);
       setTimeout(() => onDone({ won: reason === 'time', score, time: Math.min(DURATION, elapsed) }), 650);
     }
 
-    function stepOnce() {
+    function finish(reason: 'rat' | 'time') {
+      // mode “anti-finish” pour diagnostiquer l'écran noir
+      if (holdFinishFlag()) {
+        dbg.current.reason = (reason + ' (blocked)') as any;
+        dbg.current.last = `finish blocked: ${reason}`;
+        // On N'ARRETE PAS le jeu : on continue à dessiner pour voir ce qui se passe
+        return;
+      }
+      reallyFinish(reason);
+    }
+
+    function safeStepOnce() {
       // compte à rebours + invuln
       if (startCountdown > 0) startCountdown = Math.max(0, startCountdown - STEP);
       if (invulnBumpRef.current > 0) { invuln += invulnBumpRef.current; invulnBumpRef.current = 0; }
@@ -421,13 +432,31 @@ export default function MiniGame({
 
       acc += dt;
       let guard = 0;
-      while (acc >= STEP && guard < 6 && alive) {
-        stepOnce();
-        acc -= STEP;
-        guard++;
+
+      try {
+        while (acc >= STEP && guard < 6 && alive) {
+          safeStepOnce();
+          acc -= STEP;
+          guard++;
+        }
+      } catch (e: any) {
+        console.error('[MiniGame] EXCEPTION in step:', e);
+        dbg.current.err = String(e?.message || e);
+        // on n’arrête pas le jeu : on laisse draw() afficher l’erreur dans le HUD
       }
 
-      draw();
+      try {
+        draw();
+      } catch (e: any) {
+        console.error('[MiniGame] EXCEPTION in draw:', e);
+        dbg.current.err = 'draw: ' + String(e?.message || e);
+        // on tente au moins d’effacer l’écran pour que le HUD soit lisible
+        ctx.fillStyle = '#111'; ctx.fillRect(0,0,CSS_W,CSS_H);
+        ctx.fillStyle = '#ff6b6b';
+        ctx.font = '14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+        ctx.fillText('DRAW ERROR: ' + dbg.current.err, 12, 24);
+      }
+
       if (alive) requestAnimationFrame(loop);
     }
 
