@@ -114,30 +114,22 @@ export default function MiniGame({
     ).catch(() => { /* ignore */ });
     let bgScrollX = 0;
 
-    // --- SPRITE joueur (gestion casse + logs clairs)
-    async function loadSprite(name: 'toby' | 'kiki') {
-      const base = import.meta.env.BASE_URL || '/';
-      const candidates = [
-        `${base}img/sprites/${name}.PNG`,
-        `${base}img/sprites/${name}.png`,
-        `/img/sprites/${name}.PNG`,
-        `/img/sprites/${name}.png`,
-      ];
-      for (const url of candidates) {
-        try {
-          const img = await loadImage(url);
-          console.info('[MiniGame] Sprite OK →', url, { w: img.width, h: img.height });
-          return img;
-        } catch (e) {
-          console.warn('[MiniGame] Échec sprite →', url);
-        }
-      }
-      console.error('[MiniGame] Sprite introuvable pour', name, '→ vérifie public/img/sprites/');
-      return null;
-    }
-    let playerSprite: HTMLImageElement | null = null;
-    loadSprite(character === 'toby' ? 'toby' : 'kiki').then(img => { playerSprite = img; });
+   // --- SPRITE joueur (toujours dans /public/img/sprites/, casse .PNG)
+async function loadSprite(name: 'toby' | 'kiki') {
+  const base = import.meta.env.BASE_URL || '/';
+  const url = `${base}img/sprites/${name}.PNG`;
+  try {
+    const img = await loadImage(url);
+    console.info('[MiniGame] Sprite OK →', url, { w: img.width, h: img.height });
+    return img;
+  } catch (e) {
+    console.error('[MiniGame] Sprite introuvable →', url);
+    return null;
+  }
+}
 
+let playerSprite: HTMLImageElement | null = null;
+loadSprite(character).then(img => { playerSprite = img; });
     // Constantes gameplay
     const groundY     = Math.floor(CSS_H * 0.80);
     const gravity     = 1500;
