@@ -114,14 +114,30 @@ export default function MiniGame({
     ).catch(() => { /* ignore */ });
     let bgScrollX = 0;
 
-    // SPRITE joueur (PNG en MAJ)
-    const spriteURL =
-      character === 'toby'
-        ? `${base}img/sprites/toby.PNG`
-        : `${base}img/sprites/kiki.PNG`; // (kiki.PNG optionnel)
-    let playerSprite: HTMLImageElement | null = null;
-    loadImage(spriteURL).then(img => { playerSprite = img; }).catch(() => { playerSprite = null; });
+  // SPRITE joueur (essaie plusieurs chemins/casses)
+async function loadSprite(name: 'toby' | 'kiki') {
+  const base = import.meta.env.BASE_URL || '/';
+  const candidates = [
+    `${base}img/sprites/${name}.PNG`,
+    `${base}img/sprites/${name}.png`,
+    `/img/sprites/${name}.PNG`,
+    `/img/sprites/${name}.png`,
+  ];
+  for (const url of candidates) {
+    try {
+      const img = await loadImage(url);
+      console.info('[MiniGame] Sprite OK →', url);
+      return img;
+    } catch {
+      // on essaie l’URL suivante
+    }
+  }
+  console.warn('[MiniGame] Sprite introuvable pour', name, '— vérifie public/img/sprites/');
+  return null;
+}
 
+let playerSprite: HTMLImageElement | null = null;
+loadSprite(character === 'toby' ? 'toby' : 'kiki').then(img => { playerSprite = img; });
     // Constantes gameplay
     const groundY     = Math.floor(CSS_H * 0.80);
     const gravity     = 1500;
