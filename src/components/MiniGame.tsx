@@ -13,10 +13,13 @@ type Props = {
   moveRight?: boolean;
   /** incrémenté à chaque appui Saut (edge trigger) */
   jumpTick?: number;
+
+  /** permet de couper le "tap to jump" directement sur le canvas (utile sur mobile) */
+  enableTouchJump?: boolean;
 };
 
-type Obstacle = { x: number; y: number; w: number; h: number; vx: number; type: 'rat' | 'poop' };
-type Collectible = { x: number; y: number; r: number; vx: number };
+type Obstacle   = { x: number; y: number; w: number; h: number; vx: number; type: 'rat' | 'poop' };
+type Collectible= { x: number; y: number; r: number; vx: number };
 
 // ---- utils
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -36,61 +39,35 @@ export default function MiniGame({
   moveLeft,
   moveRight,
   jumpTick,
+  enableTouchJump = true,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const cvsRef = useRef<HTMLCanvasElement | null>(null);
+  const cvsRef  = useRef<HTMLCanvasElement | null>(null);
   const initedRef = useRef(false);
-
-  // === DEBUG / DIAG =========================================================
-  const DEBUG_DEFAULT = true; // Met à false si tu veux couper le HUD par défaut
-  const debugAlways = (window as any).ktDebugHUD === true;
-  const DEBUG = DEBUG_DEFAULT || debugAlways;
-
-  const holdFinishFlag = () => (window as any).ktHoldFinish === true;
-
-  // état HUD
-  const dbg = useRef({
-    // inputs
-    left: false,
-    right: false,
-    jumpTick: 0,
-    // timers/flags
-    startCountdown: 0,
-    invuln: 0,
-    alive: true,
-    reason: '' as '' | 'rat' | 'time',
-    elapsed: 0,
-    score: 0,
-    // player
-    px: 0, py: 0, pvx: 0, pvy: 0, grounded: true,
-    // world
-    obs: 0, coins: 0,
-    // last event / error
-    last: '',
-    err: '',
-  });
 
   // commandes externes synchronisées dans un ref (toujours visibles dans la boucle)
   const controlsRef = useRef({ left: !!moveLeft, right: !!moveRight, jumpTick: jumpTick ?? 0 });
-  const wantJumpRef = useRef(false);
-  const invulnBumpRef = useRef(0); // ajouté à l’invulnérabilité courante au prochain step
-
   useEffect(() => {
-    controlsRef.current.left = !!moveLeft;
+    controlsRef.current.left  = !!moveLeft;
     controlsRef.current.right = !!moveRight;
-    dbg.current.left = !!moveLeft;
-    dbg.current.right = !!moveRight;
-
-    // edge trigger pour jump
     const jt = jumpTick ?? 0;
     if (jt !== controlsRef.current.jumpTick) {
       controlsRef.current.jumpTick = jt;
       wantJumpRef.current = true;
       invulnBumpRef.current = Math.max(invulnBumpRef.current, 0.35);
-      dbg.current.jumpTick = jt;
-      if (DEBUG) console.log('[MiniGame] jumpTick edge → wantJump=true, invuln bump');
     }
   }, [moveLeft, moveRight, jumpTick]);
+
+  const wantJumpRef   = useRef(false);
+  const invulnBumpRef = useRef(0); // ajouté à l’invulnérabilité courante au prochain step
+
+  // --- DEBUG/HUD ---
+  const debugRef = useRef({
+    enabled: true,               // on dessine toujours le HUD de debug pour diagnostiquer
+    lastError: '' as string,     // texte d’erreur capturé (try/catch)
+    lastDrawOK: true,            // le dernier draw a-t-il réussi ?
+    lastStepOK: true,            // le dernier step a-t-il réussi ?
+  });
 
   useEffect(() => {
     if (initedRef.current) return; // éviter double init (StrictMode)
@@ -103,7 +80,7 @@ export default function MiniGame({
     const rect = host.getBoundingClientRect();
     const CSS_W = Math.max(240, Math.floor(rect.width));
     const CSS_H = Math.max(200, Math.floor(rect.height));
-    const DPR = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    const DPR   = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
 
     const cvs = document.createElement('canvas');
     cvsRef.current = cvs;
@@ -111,25 +88,48 @@ export default function MiniGame({
     cvs.height = Math.floor(CSS_H * DPR);
     Object.assign(cvs.style, {
       display: 'block',
-      width: `${CSS_W}px`,
+      width:  `${CSS_W}px`,
       height: `${CSS_H}px`,
       position: 'absolute',
       inset: '0',
       touchAction: 'none',
+      background: '#0b0d10', // couleur de fond visible si draw échoue
     } as CSSStyleDeclaration);
     host.appendChild(cvs);
 
-    const ctx = cvs.getContext('2d');
+    let ctx = cvs.getContext('2d');
     if (!ctx) { host.textContent = 'Canvas non supporté'; return; }
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     (ctx as any).imageSmoothingEnabled = true;
+
+    // Si le contexte est perdu (iOS/Safari peut le faire), on tente de le restaurer
+    function onContextLost(e: Event) {
+      e.preventDefault();
+      debugRef.current.lastError = 'Canvas context lost';
+      debugRef.current.lastDrawOK = false;
+    }
+    function onContextRestored() {
+      ctx = cvs.getContext('2d');
+      if (ctx) {
+        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+        (ctx as any).imageSmoothingEnabled = true;
+        debugRef.current.lastError = 'Context restored';
+        debugRef.current.lastDrawOK = true;
+      }
+    }
+    cvs.addEventListener('webglcontextlost' as any, onContextLost, false);
+    cvs.addEventListener('webglcontextrestored' as any, onContextRestored, false);
 
     // --- Fond image (Panthéon si demandé) ---
     const base = import.meta.env.BASE_URL || '/';
     const wantsPantheon = title.toLowerCase().includes('panthéon');
     const bgURL = wantsPantheon ? `${base}img/bg/pantheon.PNG` : '';
     let bgImage: HTMLImageElement | null = null;
-    if (bgURL) loadImage(bgURL).then(i => (bgImage = i)).catch(() => (bgImage = null));
+    if (bgURL) loadImage(bgURL).then(i => (bgImage = i)).catch((err) => {
+      debugRef.current.lastError = `loadImage failed: ${String(err)}`;
+      console.error('[MiniGame] loadImage failed', err);
+      bgImage = null;
+    });
 
     // --- Constantes gameplay (adoucies) ---
     const groundY     = Math.floor(CSS_H * 0.80);
@@ -157,42 +157,37 @@ export default function MiniGame({
     let invuln = START_DELAY; // invulnérabilité (au départ + petits bumps sur input)
     let finishReason: 'rat' | 'time' | null = null;
 
-    // reflète dans HUD dès le début
-    dbg.current = {
-      ...dbg.current,
-      startCountdown,
-      invuln,
-      alive,
-      reason: '',
-      elapsed: 0,
-      score: 0,
-      px: player.x, py: player.y, pvx: player.vx, pvy: player.vy, grounded: player.grounded,
-      obs: 0, coins: 0,
-      last: '',
-      err: '',
-    };
-
-    // --- Entrées clavier (desktop) ---
+    // --- Entrées clavier pour desktop seulement ---
     const keys = { left: false, right: false };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'ArrowLeft')  { keys.left = true;  dbg.current.left = true; }
-      if (e.code === 'ArrowRight') { keys.right = true; dbg.current.right = true; }
+      if (e.code === 'ArrowLeft')  keys.left = true;
+      if (e.code === 'ArrowRight') keys.right = true;
       if (e.code === 'Space' || e.code === 'ArrowUp') {
         wantJumpRef.current = true;
         invulnBumpRef.current = Math.max(invulnBumpRef.current, 0.35);
-        if (DEBUG) console.log('[MiniGame] keyboard jump → wantJump');
+        e.preventDefault();
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'ArrowLeft')  { keys.left = false;  dbg.current.left = controlsRef.current.left; }
-      if (e.code === 'ArrowRight') { keys.right = false; dbg.current.right = controlsRef.current.right; }
+      if (e.code === 'ArrowLeft')  keys.left = false;
+      if (e.code === 'ArrowRight') keys.right = false;
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
+    // Tap-to-jump direct sur le canvas (désactivable)
+    const onPointer = (e: PointerEvent) => {
+      if (!enableTouchJump) return;
+      e.preventDefault();
+      wantJumpRef.current = true;
+      invulnBumpRef.current = Math.max(invulnBumpRef.current, 0.35);
+    };
+    cvs.addEventListener('pointerdown', onPointer, { passive: false });
+
     // --- Spawns protégés ---
     const rnd = (a: number, b: number) => a + Math.random() * (b - a);
     let spawnAcc = 0;
+
     const safeSpawnX = () => player.x + player.w + 24;
 
     function trySpawn(dt: number) {
@@ -230,27 +225,29 @@ export default function MiniGame({
     };
 
     // --- Rendu ---
-    function drawHUD() {
-      if (!(DEBUG || (window as any).ktDebugHUD)) return;
-      const y0 = 46;
-      const line = (i: number, s: string) => {
-        ctx.fillText(s, 12, y0 + i * 14);
-      };
-      ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(8, 36, 300, 182);
-      ctx.fillStyle = '#fff';
-      ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-
-      line(0, `alive=${dbg.current.alive} reason=${dbg.current.reason || '-'}` + (holdFinishFlag() ? ' (hold)' : ''));
-      line(1, `elapsed=${dbg.current.elapsed.toFixed(2)}  score=${dbg.current.score}`);
-      line(2, `startC=${dbg.current.startCountdown.toFixed(2)}  invuln=${dbg.current.invuln.toFixed(2)}`);
-      line(3, `left=${dbg.current.left}  right=${dbg.current.right}  jumpTick=${dbg.current.jumpTick}`);
-      line(4, `px=${dbg.current.px.toFixed(1)} py=${dbg.current.py.toFixed(1)} vx=${dbg.current.pvx.toFixed(1)} vy=${dbg.current.pvy.toFixed(1)} g=${dbg.current.grounded}`);
-      line(5, `obs=${dbg.current.obs}  coins=${dbg.current.coins}`);
-      if (dbg.current.last) line(6, `last: ${dbg.current.last}`);
-      if (dbg.current.err)  { ctx.fillStyle = '#ff6b6b'; line(7, `ERROR: ${dbg.current.err}`); ctx.fillStyle = '#fff'; }
+    function drawSafe() {
+      try {
+        draw();
+        debugRef.current.lastDrawOK = true;
+      } catch (err) {
+        debugRef.current.lastDrawOK = false;
+        debugRef.current.lastError = `draw() error: ${String(err)}`;
+        console.error('[MiniGame] draw() error', err);
+        // Plan B : remplir l’aire avec un noir doux + message d’erreur
+        if (!ctx) return;
+        ctx.save();
+        ctx.fillStyle = '#0b0d10';
+        ctx.fillRect(0, 0, CSS_W, CSS_H);
+        ctx.fillStyle = '#fff';
+        ctx.font = '14px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.fillText(debugRef.current.lastError, 12, 24);
+        ctx.restore();
+      }
     }
 
     function draw() {
+      if (!ctx) throw new Error('2D context null');
+
       // fond
       if (bgImage) {
         const cw = CSS_W, ch = CSS_H;
@@ -287,7 +284,7 @@ export default function MiniGame({
       ctx.fillStyle = '#0b0b0b';
       ctx.fillRect(player.x + 10, player.y + 10, 8, 8);
 
-      // HUD top
+      // HUD
       ctx.fillStyle = 'rgba(255,255,255,.94)';
       ctx.font = '20px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
       ctx.fillText(title, 16, 28);
@@ -295,7 +292,41 @@ export default function MiniGame({
       ctx.fillText(String(score), CSS_W - 160, 26);
       ctx.fillText(Math.max(0, DURATION - elapsed).toFixed(1), CSS_W - 80, 26);
 
-      // écran fin
+      // DEBUG HUD DANS LE CANVAS
+      const d = debugRef.current;
+      if (d.enabled) {
+        ctx.save();
+        ctx.globalAlpha = 0.82;
+        ctx.fillStyle = '#111827';
+        ctx.fillRect(12, 56, Math.min(360, CSS_W - 24), 120);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#e5e7eb';
+        ctx.font = '14px ui-monospace, SFMono-Regular, Menlo, monospace';
+        const left  = controlsRef.current.left;
+        const right = controlsRef.current.right;
+        const jt    = controlsRef.current.jumpTick;
+        const lines = [
+          `alive=${alive} reason=${finishReason ?? '-'}`,
+          `elapsed=${elapsed.toFixed(2)} score=${score}`,
+          `startC=${startCountdown.toFixed(2)} invuln=${invuln.toFixed(2)}`,
+          `left=${left} right=${right} jumpTick=${jt}`,
+          `px=${player.x.toFixed(1)} py=${player.y.toFixed(1)} vx=${player.vx.toFixed(1)} vy=${player.vy.toFixed(1)} g=${player.grounded}`,
+          `obs=${obs.length} coins=${coins.length}`,
+          `lastDrawOK=${d.lastDrawOK} lastStepOK=${d.lastStepOK}`,
+          d.lastError ? `ERR: ${d.lastError}` : '',
+        ];
+        lines.forEach((ln, i) => ctx.fillText(ln, 20, 76 + i * 18));
+        ctx.restore();
+      }
+
+      // messages
+      if (startCountdown > 0) {
+        ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0, 0, CSS_W, CSS_H);
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+        ctx.font = '22px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+        ctx.fillText('Prêt ? Appuie pour sauter !', CSS_W / 2, CSS_H / 2);
+        ctx.textAlign = 'start';
+      }
       if (!alive) {
         ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(0, 0, CSS_W, CSS_H);
         ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
@@ -305,9 +336,6 @@ export default function MiniGame({
         ctx.fillText(`Score: ${score}`, CSS_W / 2, CSS_H / 2 + 18);
         ctx.textAlign = 'start';
       }
-
-      // HUD debug
-      drawHUD();
     }
 
     // --- Boucle fixe 60 FPS ---
@@ -316,29 +344,25 @@ export default function MiniGame({
     let acc = 0;
     let t0 = performance.now() / 1000;
 
-    function reallyFinish(reason: 'rat' | 'time') {
+    function finish(reason: 'rat' | 'time') {
       if (!alive) return;
       alive = false;
       finishReason = reason;
-      dbg.current.alive = false;
-      dbg.current.reason = reason;
-      dbg.current.last = `finish(${reason})`;
-      console.log('[MiniGame] finish reason =', reason);
       setTimeout(() => onDone({ won: reason === 'time', score, time: Math.min(DURATION, elapsed) }), 650);
     }
 
-    function finish(reason: 'rat' | 'time') {
-      // mode “anti-finish” pour diagnostiquer l'écran noir
-      if (holdFinishFlag()) {
-        dbg.current.reason = (reason + ' (blocked)') as any;
-        dbg.current.last = `finish blocked: ${reason}`;
-        // On N'ARRETE PAS le jeu : on continue à dessiner pour voir ce qui se passe
-        return;
+    function stepOnceSafe() {
+      try {
+        stepOnce();
+        debugRef.current.lastStepOK = true;
+      } catch (err) {
+        debugRef.current.lastStepOK = false;
+        debugRef.current.lastError = `stepOnce() error: ${String(err)}`;
+        console.error('[MiniGame] stepOnce() error', err);
       }
-      reallyFinish(reason);
     }
 
-    function safeStepOnce() {
+    function stepOnce() {
       // compte à rebours + invuln
       if (startCountdown > 0) startCountdown = Math.max(0, startCountdown - STEP);
       if (invulnBumpRef.current > 0) { invuln += invulnBumpRef.current; invulnBumpRef.current = 0; }
@@ -347,13 +371,11 @@ export default function MiniGame({
       // entrées effectives : externes (overlay) > clavier
       const left  = controlsRef.current.left  || keys.left;
       const right = controlsRef.current.right || keys.right;
-      dbg.current.left = left; dbg.current.right = right;
 
       // saut (edge)
       if (wantJumpRef.current && player.grounded) {
         player.vy = -jumpV;
         player.grounded = false;
-        dbg.current.last = 'jump';
       }
       wantJumpRef.current = false;
 
@@ -389,19 +411,18 @@ export default function MiniGame({
       for (const o of obs)   o.x += (o.vx * slow) * STEP;
       for (const c of coins) c.x += (c.vx * slow) * STEP;
 
-      // collisions (désactivées si invuln > 0 ou startCountdown > 0)
+      // collisions (désactivées si invuln > 0)
       if (startCountdown === 0 && invuln === 0) {
         for (const o of obs) {
           if (aabb(player, { x: o.x, y: o.y, w: o.w, h: o.h })) {
             if (o.type === 'rat') { finish('rat'); return; }
             slow = 0.55; setTimeout(() => (slow = 1), 650);
             o.x = -9999;
-            dbg.current.last = 'poop-hit';
           }
         }
       }
       for (const c of coins) {
-        if (rectCircle(player.x, player.y, player.w, player.h, c.x, c.y, c.r)) { score += 1; c.x = -9999; dbg.current.last = 'coin+'; }
+        if (rectCircle(player.x, player.y, player.w, player.h, c.x, c.y, c.r)) { score += 1; c.x = -9999; }
       }
 
       // purge
@@ -414,14 +435,6 @@ export default function MiniGame({
       // temps (réel)
       elapsed += STEP;
       if (elapsed >= DURATION) { finish('time'); return; }
-
-      // update HUD data
-      dbg.current = {
-        ...dbg.current,
-        startCountdown, invuln, alive, elapsed, score,
-        px: player.x, py: player.y, pvx: player.vx, pvy: player.vy, grounded: player.grounded,
-        obs: obs.length, coins: coins.length,
-      };
     }
 
     function loop(nowMs: number) {
@@ -432,46 +445,32 @@ export default function MiniGame({
 
       acc += dt;
       let guard = 0;
-
-      try {
-        while (acc >= STEP && guard < 6 && alive) {
-          safeStepOnce();
-          acc -= STEP;
-          guard++;
-        }
-      } catch (e: any) {
-        console.error('[MiniGame] EXCEPTION in step:', e);
-        dbg.current.err = String(e?.message || e);
-        // on n’arrête pas le jeu : on laisse draw() afficher l’erreur dans le HUD
+      while (acc >= STEP && guard < 6 && alive) {
+        stepOnceSafe();
+        acc -= STEP;
+        guard++;
       }
 
-      try {
-        draw();
-      } catch (e: any) {
-        console.error('[MiniGame] EXCEPTION in draw:', e);
-        dbg.current.err = 'draw: ' + String(e?.message || e);
-        // on tente au moins d’effacer l’écran pour que le HUD soit lisible
-        ctx.fillStyle = '#111'; ctx.fillRect(0,0,CSS_W,CSS_H);
-        ctx.fillStyle = '#ff6b6b';
-        ctx.font = '14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-        ctx.fillText('DRAW ERROR: ' + dbg.current.err, 12, 24);
-      }
-
+      drawSafe();
       if (alive) requestAnimationFrame(loop);
     }
 
     // kick
-    draw();
+    drawSafe();
     requestAnimationFrame(loop);
 
     // --- Cleanup ---
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      cvs.removeEventListener('pointerdown', onPointer);
+      cvs.removeEventListener('webglcontextlost' as any, onContextLost as any);
+      cvs.removeEventListener('webglcontextrestored' as any, onContextRestored as any);
       if (cvs.parentElement === host) host.removeChild(cvs);
       cvsRef.current = null;
     };
-  }, [character, title, onDone]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [character, title, onDone, enableTouchJump]); // (init unique)
 
   return (
     <div
