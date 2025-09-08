@@ -114,30 +114,30 @@ export default function MiniGame({
     ).catch(() => { /* ignore */ });
     let bgScrollX = 0;
 
-  // SPRITE joueur (essaie plusieurs chemins/casses)
-async function loadSprite(name: 'toby' | 'kiki') {
-  const base = import.meta.env.BASE_URL || '/';
-  const candidates = [
-    `${base}img/sprites/${name}.PNG`,
-    `${base}img/sprites/${name}.png`,
-    `/img/sprites/${name}.PNG`,
-    `/img/sprites/${name}.png`,
-  ];
-  for (const url of candidates) {
-    try {
-      const img = await loadImage(url);
-      console.info('[MiniGame] Sprite OK →', url);
-      return img;
-    } catch {
-      // on essaie l’URL suivante
+    // --- SPRITE joueur (gestion casse + logs clairs)
+    async function loadSprite(name: 'toby' | 'kiki') {
+      const base = import.meta.env.BASE_URL || '/';
+      const candidates = [
+        `${base}img/sprites/${name}.PNG`,
+        `${base}img/sprites/${name}.png`,
+        `/img/sprites/${name}.PNG`,
+        `/img/sprites/${name}.png`,
+      ];
+      for (const url of candidates) {
+        try {
+          const img = await loadImage(url);
+          console.info('[MiniGame] Sprite OK →', url, { w: img.width, h: img.height });
+          return img;
+        } catch (e) {
+          console.warn('[MiniGame] Échec sprite →', url);
+        }
+      }
+      console.error('[MiniGame] Sprite introuvable pour', name, '→ vérifie public/img/sprites/');
+      return null;
     }
-  }
-  console.warn('[MiniGame] Sprite introuvable pour', name, '— vérifie public/img/sprites/');
-  return null;
-}
+    let playerSprite: HTMLImageElement | null = null;
+    loadSprite(character === 'toby' ? 'toby' : 'kiki').then(img => { playerSprite = img; });
 
-let playerSprite: HTMLImageElement | null = null;
-loadSprite(character === 'toby' ? 'toby' : 'kiki').then(img => { playerSprite = img; });
     // Constantes gameplay
     const groundY     = Math.floor(CSS_H * 0.80);
     const gravity     = 1500;
@@ -280,18 +280,23 @@ loadSprite(character === 'toby' ? 'toby' : 'kiki').then(img => { playerSprite = 
 
     // Dessin du joueur (sprite + flip + ombre). Fallback → rectangle.
     function drawPlayer() {
-      // clignotement si invuln
-      if (invuln > 0 && Math.floor(performance.now() / 100) % 2 !== 0) return;
-
-      // petite ombre au sol
+      // ombre au sol
       ctx.fillStyle = 'rgba(0,0,0,.25)';
       ctx.beginPath();
       ctx.ellipse(player.x + player.w/2, groundY + 6, player.w*0.45, 6, 0, 0, Math.PI*2);
       ctx.fill();
 
+      // alpha doux pendant l'invuln (au lieu de "ne pas dessiner")
+      const prevAlpha = ctx.globalAlpha;
+      if (invuln > 0) {
+        const blink = (Math.floor(performance.now()/100) % 2) ? 0.55 : 1.0;
+        ctx.globalAlpha = blink;
+      }
+
       if (playerSprite) {
         const prevSmooth = (ctx as any).imageSmoothingEnabled;
         (ctx as any).imageSmoothingEnabled = false; // sprite net
+
         ctx.save();
         if (facing === -1) {
           ctx.translate(player.x + player.w, 0);
@@ -301,13 +306,17 @@ loadSprite(character === 'toby' ? 'toby' : 'kiki').then(img => { playerSprite = 
           ctx.drawImage(playerSprite, player.x, player.y, player.w, player.h);
         }
         ctx.restore();
+
         (ctx as any).imageSmoothingEnabled = prevSmooth;
       } else {
+        // fallback carré tant que le sprite n'est pas chargé
         ctx.fillStyle = bodyColor;
         ctx.fillRect(player.x, player.y, player.w, player.h);
         ctx.fillStyle = '#0b0b0b';
         ctx.fillRect(player.x + 10, player.y + 10, 8, 8);
       }
+
+      ctx.globalAlpha = prevAlpha;
     }
 
     // Rendu
