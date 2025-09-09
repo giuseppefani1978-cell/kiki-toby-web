@@ -27,7 +27,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     const img = new Image();
     img.decoding = 'async';
     img.onload = () => resolve(img);
-    img.onerror = reject;
+    img.onerror = (e) => reject(new Error(`onerror for ${src}`));
     img.src = src;
   });
 }
@@ -44,11 +44,11 @@ export default function MiniGame({
   const hostRef = useRef<HTMLDivElement>(null);
   const cvsRef  = useRef<HTMLCanvasElement | null>(null);
 
-  // conserver la dernière version d'onDone
+  // garder la dernière version de onDone sans relancer l’effet principal
   const onDoneRef = useRef(onDone);
   useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
 
-  // commandes externes
+  // commandes externes visibles dans la boucle
   const controlsRef   = useRef({ left: !!moveLeft, right: !!moveRight, jumpTick: jumpTick ?? 0 });
   const wantJumpRef   = useRef(false);
   const invulnBumpRef = useRef(0);
@@ -65,6 +65,7 @@ export default function MiniGame({
   }, [moveLeft, moveRight, jumpTick]);
 
   useEffect(() => {
+    // ---------- run once ----------
     const host = hostRef.current;
     if (!host) return;
 
@@ -101,7 +102,7 @@ export default function MiniGame({
     let bgImage: HTMLImageElement | null = null;
     if (bgURL) loadImage(bgURL).then(i => (bgImage = i)).catch(() => (bgImage = null));
 
-    // Tuiles défilantes
+    // Tuiles défilantes (PNG en MAJ)
     const tilesToLoad = [
       wantsPantheon ? `${base}img/bg/pantheon.PNG` : `${base}img/bg/street_A.PNG`,
       `${base}img/bg/street_A.PNG`,
@@ -113,32 +114,65 @@ export default function MiniGame({
     ).catch(() => { /* ignore */ });
     let bgScrollX = 0;
 
-    // --- SPRITE joueur : priorité au choix demandé, fallback sur l’autre
-    type CharName = 'toby' | 'kiki';
-    async function loadSpriteOrdered(prefer: CharName): Promise<{img: HTMLImageElement|null; used: CharName|null}> {
-      const order: CharName[] = prefer === 'toby' ? ['toby', 'kiki'] : ['kiki', 'toby'];
-      for (const name of order) {
-        try {
-          const img = await loadImage(`${base}img/sprites/${name}.PNG`);
-          return { img, used: name };
-        } catch { /* essaie l’autre */ }
-      }
-      return { img: null, used: null };
-    }
+    // ---------- SPRITES: diagnostic complet ----------
+    type SpriteDebug = {
+      receivedProp: 'kiki' | 'toby';
+      preferred: 'kiki' | 'toby';
+      preferredURL: string;
+      preferredError?: string;
+      fellBackToKiki: boolean;
+      fallbackURL?: string;
+      fallbackError?: string;
+      loadedName?: 'kiki' | 'toby';
+      loadedSize?: string;
+    };
+
+    const spriteDbg: SpriteDebug = {
+      receivedProp: character,
+      preferred: character,
+      preferredURL: `${base}img/sprites/${character}.PNG`,
+      fellBackToKiki: false,
+    };
 
     let playerSprite: HTMLImageElement | null = null;
-    let spriteUsed: CharName | null = null;
-    let spriteStatus: 'loading' | 'loaded' | 'error' = 'loading';
-    let spriteHUDFrames = 0;
+    let loadedName: 'kiki' | 'toby' | undefined;
+    let spriteHUDTimer = 360; // ~6s visible
 
-    loadSpriteOrdered(character).then(({img, used}) => {
-      playerSprite = img;
-      spriteUsed   = used;
-      spriteStatus = img ? 'loaded' : 'error';
-      spriteHUDFrames = img ? 90 : 300; // ~1.5s / 5s
-    });
+    // Try preferred (prop)
+    loadImage(spriteDbg.preferredURL)
+      .then(img => {
+        playerSprite = img;
+        loadedName = character;
+        spriteDbg.loadedName = loadedName;
+        spriteDbg.loadedSize = `${img.width}×${img.height}`;
+        (window as any).__kt_lastSpriteDebug = spriteDbg;
+        console.info('[MiniGame sprite]', spriteDbg);
+      })
+      .catch(async (err) => {
+        spriteDbg.preferredError = String(err?.message || err || 'unknown error');
 
-    // Constantes gameplay
+        // Fallback to Kiki if preferred failed
+        if (character !== 'kiki') {
+          spriteDbg.fellBackToKiki = true;
+          spriteDbg.fallbackURL = `${base}img/sprites/kiki.PNG`;
+          try {
+            const img2 = await loadImage(spriteDbg.fallbackURL);
+            playerSprite = img2;
+            loadedName = 'kiki';
+            spriteDbg.loadedName = loadedName;
+            spriteDbg.loadedSize = `${img2.width}×${img2.height}`;
+          } catch (err2) {
+            spriteDbg.fallbackError = String(err2?.message || err2 || 'unknown error');
+            playerSprite = null;
+            loadedName = undefined;
+          }
+        }
+
+        (window as any).__kt_lastSpriteDebug = spriteDbg;
+        console.warn('[MiniGame sprite]', spriteDbg);
+      });
+
+    // ---- gameplay constants
     const groundY     = Math.floor(CSS_H * 0.80);
     const gravity     = 1500;
     const jumpV       = 540;
@@ -166,7 +200,7 @@ export default function MiniGame({
     let hp = MAX_HP;
     let finishReason: 'rat' | 'time' | null = null;
 
-    // Clavier
+    // Clavier (desktop)
     const keys = { left: false, right: false };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'ArrowLeft')  keys.left = true;
@@ -184,7 +218,7 @@ export default function MiniGame({
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
-    // Tap-to-jump
+    // Tap-to-jump optionnel
     const onPointer = (e: PointerEvent) => {
       if (!enableTouchJump) return;
       e.preventDefault();
@@ -316,24 +350,42 @@ export default function MiniGame({
       ctx.globalAlpha = prevAlpha;
     }
 
-    // Petit bandeau debug sprite (s’affiche brièvement)
+    // HUD debug sprite en haut-gauche (auto-masque après quelques secondes si tout va bien)
     function drawSpriteDebugHUD() {
-      if (spriteHUDFrames > 0) spriteHUDFrames--;
-      if (!spriteHUDFrames && spriteStatus === 'loaded') return;
+      if (spriteHUDTimer > 0) spriteHUDTimer--;
+
+      // si OK et plus de timer → on n'affiche pas
+      if (spriteHUDTimer <= 0 && spriteDbg.loadedName && !spriteDbg.preferredError) return;
 
       const lines = [
-        `sprite: ${spriteStatus}${spriteUsed ? ` (${spriteUsed})` : ''}`,
-        `img: ${playerSprite ? `${playerSprite.width}×${playerSprite.height}` : '—'}`,
-      ];
+        `prop: ${spriteDbg.receivedProp}`,
+        `preferred: ${spriteDbg.preferred}`,
+        `preferredURL: ${spriteDbg.preferredURL}`,
+        spriteDbg.preferredError ? `preferredError: ${spriteDbg.preferredError}` : `preferredOK`,
+        `fallbackToKiki: ${spriteDbg.fellBackToKiki}`,
+        spriteDbg.fallbackURL ? `fallbackURL: ${spriteDbg.fallbackURL}` : '',
+        spriteDbg.fallbackError ? `fallbackError: ${spriteDbg.fallbackError}` : '',
+        `loaded: ${spriteDbg.loadedName ?? '—'} ${spriteDbg.loadedSize ? `(${spriteDbg.loadedSize})` : ''}`,
+      ].filter(Boolean) as string[];
+
       const pad = 8;
       ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-      const w = Math.max(140, Math.max(...lines.map(t => Math.ceil(ctx.measureText(t).width))) + pad * 2);
-      const h = pad * 2 + 14 * lines.length + 4;
+      const w = Math.min(
+        CSS_W - 20,
+        Math.max(...lines.map(t => Math.ceil(ctx.measureText(t).width))) + pad * 2 + 40
+      );
+      const h = pad * 2 + 14 * lines.length + 6;
       ctx.fillStyle = 'rgba(0,0,0,.65)';
       ctx.fillRect(10, 10, w, h);
       ctx.fillStyle = '#cbd5e1';
       let y = 10 + pad + 10;
       for (const t of lines) { ctx.fillText(t, 10 + pad, y); y += 14; }
+
+      // mini-aperçu 32×32
+      if (playerSprite) {
+        (ctx as any).imageSmoothingEnabled = false;
+        ctx.drawImage(playerSprite, w - 36, 14, 32, 32);
+      }
     }
 
     // Rendu
@@ -362,7 +414,7 @@ export default function MiniGame({
       // HUD basique
       ctx.fillStyle = 'rgba(255,255,255,.94)';
       ctx.font = '20px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
-      ctx.fillText(title, 16, 28);
+      ctx.fillText(`${title} — ${character.toUpperCase()}`, 16, 28);
       ctx.font = '16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
       ctx.fillText(String(score), CSS_W - 160, 26);
       ctx.fillText(Math.max(0, DURATION - elapsed).toFixed(1), CSS_W - 80, 26);
