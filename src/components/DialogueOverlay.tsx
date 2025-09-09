@@ -1,3 +1,4 @@
+// src/components/DialogueOverlay.tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMap } from 'react-leaflet';
 import type { POI } from './MapView';
@@ -5,12 +6,13 @@ import { addFragment } from '../store/game';
 
 type Props = {
   poi: POI;
-  onClose: () => void;
+  /** Pass 'kiki' or 'toby' when a choice is made; undefined when closed via ✕ */
+  onClose: (picked?: 'kiki' | 'toby') => void;
 };
 
 function useScreenPoint(lat: number, lng: number) {
   const map = useMap();
-  const [pt, setPt] = useState<{x:number;y:number} | null>(null);
+  const [pt, setPt] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const update = () => {
@@ -28,12 +30,15 @@ function useScreenPoint(lat: number, lng: number) {
 export default function DialogueOverlay({ poi, onClose }: Props) {
   const pt = useScreenPoint(poi.lat, poi.lng);
   const bubbleOffset = useMemo(() => ({ left: -120, top: -160 }), []);
+  const base = (import.meta as any).env?.BASE_URL || '/'; // ex: '/kiki-toby-web/'
 
   if (!pt) return null;
 
-  const pick = (who: 'kiki'|'toby') => {
+  const pick = (who: 'kiki' | 'toby') => {
+    // on enregistre le fragment…
     addFragment({ poiId: poi.id, who });
-    onClose();
+    // …et on remonte le choix au parent (Apps.tsx)
+    onClose(who);
   };
 
   return (
@@ -41,28 +46,36 @@ export default function DialogueOverlay({ poi, onClose }: Props) {
       {/* ancre au point du POI */}
       <div
         className="bubble-wrap"
-        style={{ transform:`translate(${pt.x + bubbleOffset.left}px, ${pt.y + bubbleOffset.top}px)` }}
+        style={{ transform: `translate(${pt.x + bubbleOffset.left}px, ${pt.y + bubbleOffset.top}px)` }}
       >
         <div className="avatars">
           <div className="avatar">
-            <img src="/kiki-toby-web/avatars/kiki.png" alt="Kiki" onError={(e:any)=>{e.currentTarget.replaceWith(document.createTextNode('🐱'))}} />
+            <img
+              src={`${base}avatars/kiki.png`}
+              alt="Kiki"
+              onError={(e: any) => { e.currentTarget.replaceWith(document.createTextNode('🐱')); }}
+            />
           </div>
           <div className="avatar">
-            <img src="/kiki-toby-web/avatars/toby.png" alt="Toby" onError={(e:any)=>{e.currentTarget.replaceWith(document.createTextNode('🐶'))}} />
+            <img
+              src={`${base}avatars/toby.png`}
+              alt="Toby"
+              onError={(e: any) => { e.currentTarget.replaceWith(document.createTextNode('🐶')); }}
+            />
           </div>
         </div>
 
         <div className="speech speech-kiki">
           <div className="speech-text">🐱 <b>Kiki</b> — {poi.kiki}</div>
-          <button className="chip" onClick={()=>pick('kiki')}>Soutenir Kiki</button>
+          <button className="chip" onClick={() => pick('kiki')}>Soutenir Kiki</button>
         </div>
 
         <div className="speech speech-toby">
           <div className="speech-text">🐶 <b>Toby</b> — {poi.toby}</div>
-          <button className="chip" onClick={()=>pick('toby')}>Soutenir Toby</button>
+          <button className="chip" onClick={() => pick('toby')}>Soutenir Toby</button>
         </div>
 
-        <button className="close-x" aria-label="Fermer" onClick={onClose}>✕</button>
+        <button className="close-x" aria-label="Fermer" onClick={() => onClose()}>✕</button>
       </div>
     </div>
   );
