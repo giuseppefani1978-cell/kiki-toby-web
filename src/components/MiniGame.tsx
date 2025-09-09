@@ -120,8 +120,8 @@ export default function MiniGame({
     // Ennemis / items (.png en min)
     const ratURL       = `${base}img/sprites/rat.png`;
     const pigeonURL    = `${base}img/sprites/pigeon.png`;
-    const fishURL      = `${base}img/sprites/fish.png`;
-    const boneURL      = `${base}img/sprites/bone.png`;
+    const fishURL      = `${base}img/sprites/fish.PNG`;
+    const boneURL      = `${base}img/sprites/bone.PNG`;
 
     let playerSprite: HTMLImageElement | null = null;
     let ratSprite: HTMLImageElement | null = null;
