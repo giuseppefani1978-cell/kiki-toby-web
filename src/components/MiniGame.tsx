@@ -8,7 +8,6 @@ type Props = {
   title?: string;
   onDone: (res: Result) => void;
 
-  // commandes externes (depuis l’overlay)
   moveLeft?: boolean;
   moveRight?: boolean;
   /** incrémenté à chaque appui Saut (edge trigger) */
@@ -44,11 +43,9 @@ export default function MiniGame({
   const hostRef = useRef<HTMLDivElement>(null);
   const cvsRef  = useRef<HTMLCanvasElement | null>(null);
 
-  // garder la dernière version de onDone sans relancer l’effet principal
   const onDoneRef = useRef(onDone);
   useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
 
-  // commandes externes visibles dans la boucle
   const controlsRef   = useRef({ left: !!moveLeft, right: !!moveRight, jumpTick: jumpTick ?? 0 });
   const wantJumpRef   = useRef(false);
   const invulnBumpRef = useRef(0);
@@ -65,7 +62,6 @@ export default function MiniGame({
   }, [moveLeft, moveRight, jumpTick]);
 
   useEffect(() => {
-    // ---------- run once ----------
     const host = hostRef.current;
     if (!host) return;
 
@@ -114,25 +110,29 @@ export default function MiniGame({
     ).catch(() => { /* ignore */ });
     let bgScrollX = 0;
 
-    // --- SPRITE joueur (toujours dans /public/img/sprites/, casse .PNG)
+    // --- SPRITE joueur : essaie plusieurs chemins (BASE_URL, /, et public/ en secours)
     async function loadSprite(name: 'toby' | 'kiki') {
-      const base = import.meta.env.BASE_URL || '/';
-      const url = `${base}img/sprites/${name}.PNG`;
-      console.info('[MiniGame] trying sprite URL:', url);
-      try {
-        const img = await loadImage(url);
-        if (!img || !img.complete || img.naturalWidth === 0) {
-          throw new Error('decoded but empty image');
-        }
-        console.info('[MiniGame] sprite loaded:', url, { w: img.naturalWidth, h: img.naturalHeight });
-        return img;
-      } catch (e) {
-        console.error('[MiniGame] sprite FAILED:', url, e);
-        return null;
+      const candidates = [
+        `${base}img/sprites/${name}.PNG`, // ex: /kiki-toby-web/img/...
+        `/img/sprites/${name}.PNG`,       // ex: /img/...
+        `public/img/sprites/${name}.PNG`, // rarement utile, mais inoffensif si 404
+      ];
+      for (const url of candidates) {
+        try {
+          const img = await loadImage(url);
+          return img;
+        } catch {}
       }
+      return null;
     }
+
     let playerSprite: HTMLImageElement | null = null;
-    loadSprite(character).then(img => { playerSprite = img; });
+    let spriteStatus = 'loading…';
+    loadSprite(character).then(img => {
+      playerSprite = img;
+      spriteStatus = img ? 'loaded' : 'error';
+      statusTimer = 120; // ~2s d’affichage du statut (120 frames / 60fps)
+    });
 
     // Constantes gameplay
     const groundY     = Math.floor(CSS_H * 0.80);
@@ -142,29 +142,27 @@ export default function MiniGame({
     const frictionX   = 900;
     const maxVx       = 220;
     const worldSpeed  = 170;
-    const DURATION    = 20;      // durée du run (en s)
-    const START_DELAY = 0.8;     // protection départ
-    const MAX_HP      = 3;       // ❤❤❤
-    const HIT_IFRAMES = 1.0;     // invulnérabilité après un coup (s)
+    const DURATION    = 20;
+    const START_DELAY = 0.8;
+    const MAX_HP      = 3;
+    const HIT_IFRAMES = 1.0;
 
-    const bodyColor = character === 'kiki' ? '#FFB84D' : '#5E93FF';
-
-    // État
-    const player = { x: 80, y: groundY - 36, w: 36, h: 36, vx: 0, vy: 0, grounded: true };
+    // état
+    const player = { x: 80, y: groundY - 48, w: 48, h: 48, vx: 0, vy: 0, grounded: true }; // 48px pour mieux voir le sprite
     const obs: Obstacle[] = [];
     const coins: Collectible[] = [];
+    let facing: 1 | -1 = 1;
 
     let score = 0;
     let elapsed = 0;
     let alive = true;
     let slow = 1;
     let startCountdown = START_DELAY;
-    let invuln = START_DELAY; // invuln au départ
+    let invuln = START_DELAY;
     let hp = MAX_HP;
     let finishReason: 'rat' | 'time' | null = null;
-    let facing: 1 | -1 = 1; // flip du sprite
 
-    // Clavier (desktop)
+    // Clavier
     const keys = { left: false, right: false };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'ArrowLeft')  keys.left = true;
@@ -182,7 +180,7 @@ export default function MiniGame({
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
-    // Tap-to-jump optionnel
+    // Tap-to-jump
     const onPointer = (e: PointerEvent) => {
       if (!enableTouchJump) return;
       e.preventDefault();
@@ -274,7 +272,7 @@ export default function MiniGame({
       }
     }
 
-    // Dessin du joueur (sprite + flip + ombre). Fallback → rectangle.
+    // Dessin du joueur
     function drawPlayer() {
       // ombre au sol
       ctx.fillStyle = 'rgba(0,0,0,.25)';
@@ -282,39 +280,47 @@ export default function MiniGame({
       ctx.ellipse(player.x + player.w/2, groundY + 6, player.w*0.45, 6, 0, 0, Math.PI*2);
       ctx.fill();
 
+      // invuln “blink” doux
       const prevAlpha = ctx.globalAlpha;
-      const prevSmooth = (ctx as any).imageSmoothingEnabled;
-
-      // alpha doux pendant l'invuln
       if (invuln > 0) {
         const blink = (Math.floor(performance.now()/100) % 2) ? 0.55 : 1.0;
         ctx.globalAlpha = blink;
       }
 
-      // ne dessine le sprite que s'il est vraiment prêt
-      const hasSprite = !!(playerSprite && playerSprite.complete && playerSprite.naturalWidth > 0);
-
-      if (hasSprite) {
-        (ctx as any).imageSmoothingEnabled = false; // sprite net
+      if (playerSprite) {
+        const prevSmooth = (ctx as any).imageSmoothingEnabled;
+        (ctx as any).imageSmoothingEnabled = false;
         ctx.save();
         if (facing === -1) {
           ctx.translate(player.x + player.w, 0);
           ctx.scale(-1, 1);
-          ctx.drawImage(playerSprite as HTMLImageElement, 0, player.y, player.w, player.h);
+          ctx.drawImage(playerSprite, 0, player.y, player.w, player.h);
         } else {
-          ctx.drawImage(playerSprite as HTMLImageElement, player.x, player.y, player.w, player.h);
+          ctx.drawImage(playerSprite, player.x, player.y, player.w, player.h);
         }
         ctx.restore();
+        (ctx as any).imageSmoothingEnabled = prevSmooth;
       } else {
         // fallback carré tant que le sprite n'est pas chargé
-        ctx.fillStyle = bodyColor;
+        ctx.fillStyle = character === 'kiki' ? '#FFB84D' : '#5E93FF';
         ctx.fillRect(player.x, player.y, player.w, player.h);
         ctx.fillStyle = '#0b0b0b';
         ctx.fillRect(player.x + 10, player.y + 10, 8, 8);
       }
 
-      (ctx as any).imageSmoothingEnabled = prevSmooth;
       ctx.globalAlpha = prevAlpha;
+    }
+
+    // Petit HUD “sprite: loaded/error” visible 2s
+    let statusTimer = 0;
+    function drawSpriteStatus() {
+      if (statusTimer <= 0) return;
+      statusTimer--;
+      ctx.fillStyle = 'rgba(0,0,0,.55)';
+      ctx.fillRect(10, 10, 150, 26);
+      ctx.fillStyle = '#fff';
+      ctx.font = '14px system-ui';
+      ctx.fillText(`sprite: ${playerSprite ? 'loaded' : 'error'}`, 16, 28);
     }
 
     // Rendu
@@ -340,17 +346,17 @@ export default function MiniGame({
       // joueur
       drawPlayer();
 
-      // HUD
+      // HUD basique
       ctx.fillStyle = 'rgba(255,255,255,.94)';
       ctx.font = '20px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
       ctx.fillText(title, 16, 28);
       ctx.font = '16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
       ctx.fillText(String(score), CSS_W - 160, 26);
       ctx.fillText(Math.max(0, DURATION - elapsed).toFixed(1), CSS_W - 80, 26);
-
-      // PV (cœurs)
       ctx.font = '18px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
       ctx.fillText('❤'.repeat(hp), 16, 52);
+
+      drawSpriteStatus();
 
       // overlays fin/départ
       if (startCountdown > 0) {
@@ -392,7 +398,7 @@ export default function MiniGame({
       const left  = controlsRef.current.left  || keys.left;
       const right = controlsRef.current.right || keys.right;
 
-      // saut (edge)
+      // saut
       if (wantJumpRef.current && player.grounded) {
         player.vy = -jumpV;
         player.grounded = false;
@@ -430,10 +436,10 @@ export default function MiniGame({
       if (player.x < 8) { player.x = 8; player.vx = 0; }
       if (player.x > CSS_W - player.w - 8) { player.x = CSS_W - player.w - 8; player.vx = 0; }
 
-      // avancer le fond (léger ralentissement si “poop”)
+      // fond
       bgScrollX += (worldSpeed * slow) * STEP;
 
-      // monde (défilement simple)
+      // monde
       for (const o of obs)   o.x += o.vx * STEP;
       for (const c of coins) c.x += c.vx * STEP;
 
@@ -443,9 +449,7 @@ export default function MiniGame({
           if (aabb(player, { x: o.x, y: o.y, w: o.w, h: o.h })) {
             if (o.type === 'rat') {
               if (invuln === 0) {
-                hp -= 1;
-                invuln = HIT_IFRAMES;
-                player.vx = -120; // petit recul
+                hp -= 1; invuln = HIT_IFRAMES; player.vx = -120;
                 if (hp <= 0) { finish('rat'); return; }
               }
             } else {
@@ -477,7 +481,7 @@ export default function MiniGame({
       t0 = now;
       if (dt > MAX_FRAME) dt = MAX_FRAME;
 
-      acc += dt * slow; // “poop” ralentit légèrement la boucle de jeu
+      acc += dt * slow;
       let guard = 0;
       while (acc >= STEP && guard < 6 && alive) {
         stepOnce();
@@ -489,7 +493,6 @@ export default function MiniGame({
       if (alive) requestAnimationFrame(loop);
     }
 
-    // start
     draw();
     requestAnimationFrame(loop);
 
@@ -501,7 +504,6 @@ export default function MiniGame({
       if (cvs.parentElement === host) host.removeChild(cvs);
       cvsRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // run once
 
   return (
