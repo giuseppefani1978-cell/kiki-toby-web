@@ -118,9 +118,9 @@ export default function MiniGame({
         ? `${base}img/sprites/toby.PNG`
         : `${base}img/sprites/kiki.PNG`;
 
-    const enemyRatURL    = `${base}img/sprites/rat.png`;
-    const enemyPigeonURL = `${base}img/sprites/pigeon.png`;
-    const poopURL        = `${base}img/sprites/poop.PNG`; // ⬅️ MAJUSCULE demandé
+    const enemyRatURL    = `${base}img/sprites/rat.png`;      // .png
+    const enemyPigeonURL = `${base}img/sprites/pigeon.png`;   // .png
+    const poopURL        = `${base}img/sprites/poop.PNG`;     // .PNG (MAJ)
 
     let playerSprite: HTMLImageElement | null = null;
     let ratSprite: HTMLImageElement | null = null;
@@ -142,11 +142,11 @@ export default function MiniGame({
     const worldSpeed  = 170;
 
     const DURATION    = 20;
-    const START_DELAY = 0.45;   // plus court
+    const START_DELAY = 0.45;   // démarrage plus court
     const MAX_HP      = 3;
     const HIT_IFRAMES = 1.0;
 
-    // Visuel du joueur +20% sans changer la hitbox
+    // Visuel du joueur +20% (hitbox inchangée)
     const PLAYER_VIS_SCALE = 1.2;
 
     // état
@@ -225,7 +225,7 @@ export default function MiniGame({
       if (coins.length > 10) coins.splice(0, coins.length - 10);
     }
 
-    // Collisions
+    // Collisions helpers
     const aabb = (a:{x:number;y:number;w:number;h:number}, b:{x:number;y:number;w:number;h:number}) =>
       a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
@@ -328,7 +328,6 @@ export default function MiniGame({
 
     // Dessin des obstacles (sprites rat, pigeon, poop si dispo)
     function drawObstacle(o: Obstacle) {
-      // on dessine d'abord les sprites connus
       if (o.type === 'rat' && ratSprite) {
         const prev = (ctx as any).imageSmoothingEnabled;
         (ctx as any).imageSmoothingEnabled = false;
@@ -352,7 +351,7 @@ export default function MiniGame({
         return;
       }
 
-      // sinon fallback rectangles colorés
+      // sinon fallback rectangles colorés (éviter le gris “bug”)
       if (o.type === 'poop') {
         ctx.fillStyle = '#8B4513'; // marron lisible
       } else if (o.type === 'rat') {
@@ -374,9 +373,10 @@ export default function MiniGame({
       // entités
       for (const o of obs) drawObstacle(o);
 
+      // collectibles — or
       for (const c of coins) {
         ctx.beginPath();
-        ctx.fillStyle = character === 'kiki' ? '#ff9500' : '#007aff';
+        ctx.fillStyle = '#ffcc00';
         ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
         ctx.fill();
       }
@@ -427,6 +427,9 @@ export default function MiniGame({
       setTimeout(() => onDoneRef.current({ won: reason === 'time', score, time: Math.min(DURATION, elapsed) }), 650);
     }
 
+    // Pour le stomp: mémoriser la position précédente en Y
+    let prevY = 0;
+
     function stepOnce() {
       if (startCountdown > 0) startCountdown = Math.max(0, startCountdown - STEP);
       if (invulnBumpRef.current > 0) { invuln += invulnBumpRef.current; invulnBumpRef.current = 0; }
@@ -444,6 +447,7 @@ export default function MiniGame({
 
       // vertical
       player.vy += gravity * STEP;
+      prevY = player.y;
       player.y  += player.vy * STEP;
       if (player.y >= groundY - player.h) {
         player.y = groundY - player.h;
@@ -480,24 +484,48 @@ export default function MiniGame({
       for (const o of obs)   o.x += o.vx * STEP;
       for (const c of coins) c.x += c.vx * STEP;
 
-      // collisions
+      // collisions (avec stomp rat)
       if (startCountdown === 0) {
         for (const o of obs) {
           if (aabb(player, { x: o.x, y: o.y, w: o.w, h: o.h })) {
-            if (o.type === 'rat' || o.type === 'pigeon') {
+
+            if (o.type === 'rat') {
+              // Stomp si on vient d'au-dessus et qu'on descend
+              const wasAbove = (prevY + player.h) <= (o.y + 6);
+              const movingDown = player.vy > 0;
+              if (wasAbove && movingDown) {
+                o.x = -9999;           // “écrasé”
+                player.vy = -jumpV * 0.55; // rebond
+                score += 2;
+                continue; // pas de dégâts
+              }
+              // sinon dégâts
               if (invuln === 0) {
                 hp -= 1; invuln = HIT_IFRAMES; player.vx = -120;
                 if (hp <= 0) { finish('rat'); return; }
               }
+
+            } else if (o.type === 'pigeon') {
+              // pas de stomp sur pigeon → dégâts
+              if (invuln === 0) {
+                hp -= 1; invuln = HIT_IFRAMES; player.vx = -120;
+                if (hp <= 0) { finish('rat'); return; }
+              }
+
             } else {
+              // poop: ralentit puis disparaît
               slow = 0.55; setTimeout(() => (slow = 1), 650);
               o.x = -9999;
             }
           }
         }
       }
+
+      // pièces
       for (const c of coins) {
-        if (rectCircle(player.x, player.y, player.w, player.h, c.x, c.y, c.r)) { score += 1; c.x = -9999; }
+        if (rectCircle(player.x, player.y, player.w, player.h, c.x, c.y, c.r)) {
+          score += 1; c.x = -9999;
+        }
       }
 
       // purge
