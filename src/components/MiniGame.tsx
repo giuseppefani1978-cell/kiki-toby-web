@@ -24,6 +24,7 @@ type Collectible = { x: number; y: number; r: number; vx: number };
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    // NOTE: pas de img.crossOrigin ici → même origine GitHub Pages
     img.decoding = 'async';
     img.onload = () => resolve(img);
     img.onerror = reject;
@@ -110,29 +111,31 @@ export default function MiniGame({
     ).catch(() => { /* ignore */ });
     let bgScrollX = 0;
 
-    // --- SPRITE joueur : essaie plusieurs chemins (BASE_URL, /, et public/ en secours)
-    async function loadSprite(name: 'toby' | 'kiki') {
-      const candidates = [
-        `${base}img/sprites/${name}.PNG`, // ex: /kiki-toby-web/img/...
-        `/img/sprites/${name}.PNG`,       // ex: /img/...
-        `public/img/sprites/${name}.PNG`, // rarement utile, mais inoffensif si 404
-      ];
-      for (const url of candidates) {
-        try {
-          const img = await loadImage(url);
-          return img;
-        } catch {}
-      }
-      return null;
-    }
+    // --- SPRITE joueur (URL absolue — même origine que ton site GitHub Pages)
+    // IMPORTANT: pas de 'public/' devant. Les assets sont servis à /img/...
+    const ABS_BASE = 'https://giuseppefani1978-cell.github.io/kiki-toby-web';
+    const spriteURL =
+      character === 'toby'
+        ? `${ABS_BASE}/img/sprites/toby.PNG`
+        : `${ABS_BASE}/img/sprites/kiki.PNG`;
 
     let playerSprite: HTMLImageElement | null = null;
     let spriteStatus = 'loading…';
-    loadSprite(character).then(img => {
-      playerSprite = img;
-      spriteStatus = img ? 'loaded' : 'error';
-      statusTimer = 120; // ~2s d’affichage du statut (120 frames / 60fps)
-    });
+    let spriteStatusTimer = 0; // frames à afficher le statut
+
+    loadImage(spriteURL)
+      .then(img => {
+        playerSprite = img;
+        spriteStatus = 'loaded';
+        spriteStatusTimer = 120; // ~2s
+        console.info('[MiniGame] sprite loaded:', spriteURL, { w: img.width, h: img.height });
+      })
+      .catch(err => {
+        playerSprite = null;
+        spriteStatus = 'error';
+        spriteStatusTimer = 240; // laisse plus longtemps si erreur
+        console.error('[MiniGame] sprite error:', spriteURL, err);
+      });
 
     // Constantes gameplay
     const groundY     = Math.floor(CSS_H * 0.80);
@@ -148,7 +151,7 @@ export default function MiniGame({
     const HIT_IFRAMES = 1.0;
 
     // état
-    const player = { x: 80, y: groundY - 48, w: 48, h: 48, vx: 0, vy: 0, grounded: true }; // 48px pour mieux voir le sprite
+    const player = { x: 80, y: groundY - 48, w: 48, h: 48, vx: 0, vy: 0, grounded: true };
     const obs: Obstacle[] = [];
     const coins: Collectible[] = [];
     let facing: 1 | -1 = 1;
@@ -302,7 +305,8 @@ export default function MiniGame({
         (ctx as any).imageSmoothingEnabled = prevSmooth;
       } else {
         // fallback carré tant que le sprite n'est pas chargé
-        ctx.fillStyle = character === 'kiki' ? '#FFB84D' : '#5E93FF';
+        const bodyColor = character === 'kiki' ? '#FFB84D' : '#5E93FF';
+        ctx.fillStyle = bodyColor;
         ctx.fillRect(player.x, player.y, player.w, player.h);
         ctx.fillStyle = '#0b0b0b';
         ctx.fillRect(player.x + 10, player.y + 10, 8, 8);
@@ -311,16 +315,17 @@ export default function MiniGame({
       ctx.globalAlpha = prevAlpha;
     }
 
-    // Petit HUD “sprite: loaded/error” visible 2s
-    let statusTimer = 0;
+    // Petit HUD “sprite: loaded/error” visible quelques secondes
     function drawSpriteStatus() {
-      if (statusTimer <= 0) return;
-      statusTimer--;
+      if (!spriteStatusTimer) return;
+      spriteStatusTimer--;
       ctx.fillStyle = 'rgba(0,0,0,.55)';
-      ctx.fillRect(10, 10, 150, 26);
-      ctx.fillStyle = '#fff';
+      const text = `sprite: ${spriteStatus}`;
       ctx.font = '14px system-ui';
-      ctx.fillText(`sprite: ${playerSprite ? 'loaded' : 'error'}`, 16, 28);
+      const w = Math.ceil(ctx.measureText(text).width) + 12;
+      ctx.fillRect(10, 10, w, 26);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(text, 16, 28);
     }
 
     // Rendu
