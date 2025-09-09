@@ -24,7 +24,7 @@ type Collectible = { x: number; y: number; r: number; vx: number };
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    // NOTE: pas de img.crossOrigin ici → même origine GitHub Pages
+    // IMPORTANT: pas de crossOrigin ici, même origine GitHub Pages
     img.decoding = 'async';
     img.onload = () => resolve(img);
     img.onerror = reject;
@@ -70,7 +70,7 @@ export default function MiniGame({
     const rect  = host.getBoundingClientRect();
     const CSS_W = Math.max(240, Math.floor(rect.width));
     const CSS_H = Math.max(200, Math.floor(rect.height));
-    const DPR   = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    const DPR   = Math.max(1, Math.min(3, (window as any).devicePixelRatio || 1));
 
     const cvs = document.createElement('canvas');
     cvsRef.current = cvs;
@@ -111,8 +111,8 @@ export default function MiniGame({
     ).catch(() => { /* ignore */ });
     let bgScrollX = 0;
 
-    // --- SPRITE joueur (URL absolue — même origine que ton site GitHub Pages)
-    // IMPORTANT: pas de 'public/' devant. Les assets sont servis à /img/...
+    // --- SPRITE joueur (URL absolue — même origine GitHub Pages)
+    // Tu as vérifié que cette URL affiche bien l'image dans Safari.
     const ABS_BASE = 'https://giuseppefani1978-cell.github.io/kiki-toby-web';
     const spriteURL =
       character === 'toby'
@@ -120,20 +120,27 @@ export default function MiniGame({
         : `${ABS_BASE}/img/sprites/kiki.PNG`;
 
     let playerSprite: HTMLImageElement | null = null;
-    let spriteStatus = 'loading…';
+    let spriteStatus: 'loading' | 'loaded' | 'error' | 'head-404' = 'loading';
     let spriteStatusTimer = 0; // frames à afficher le statut
+
+    // (optionnel) petit HEAD pour diagnostiquer un 404 côté iOS si jamais
+    try {
+      fetch(spriteURL, { method: 'HEAD' })
+        .then(r => { if (!r.ok) spriteStatus = 'head-404'; })
+        .catch(() => { /* ignore réseau */ });
+    } catch {/* no-op */ }
 
     loadImage(spriteURL)
       .then(img => {
         playerSprite = img;
         spriteStatus = 'loaded';
-        spriteStatusTimer = 120; // ~2s
+        spriteStatusTimer = 180; // ~3s
         console.info('[MiniGame] sprite loaded:', spriteURL, { w: img.width, h: img.height });
       })
       .catch(err => {
         playerSprite = null;
         spriteStatus = 'error';
-        spriteStatusTimer = 240; // laisse plus longtemps si erreur
+        spriteStatusTimer = 360; // laisser visible si erreur
         console.error('[MiniGame] sprite error:', spriteURL, err);
       });
 
@@ -315,17 +322,34 @@ export default function MiniGame({
       ctx.globalAlpha = prevAlpha;
     }
 
-    // Petit HUD “sprite: loaded/error” visible quelques secondes
-    function drawSpriteStatus() {
-      if (!spriteStatusTimer) return;
-      spriteStatusTimer--;
-      ctx.fillStyle = 'rgba(0,0,0,.55)';
-      const text = `sprite: ${spriteStatus}`;
-      ctx.font = '14px system-ui';
-      const w = Math.ceil(ctx.measureText(text).width) + 12;
-      ctx.fillRect(10, 10, w, 26);
-      ctx.fillStyle = '#fff';
-      ctx.fillText(text, 16, 28);
+    // Bandeau debug sprite (statut + aperçu 32px)
+    function drawSpriteDebugHUD() {
+      if (spriteStatusTimer > 0) spriteStatusTimer--;
+      if (!spriteStatusTimer && spriteStatus === 'loaded') return; // masque quand OK
+
+      const lines = [
+        `sprite: ${spriteStatus}`,
+        `url: ${spriteURL}`,
+        `img: ${playerSprite ? `${playerSprite.width}×${playerSprite.height}` : '—'}`,
+      ];
+      const pad = 8;
+      ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+      const w = Math.min(
+        CSS_W - 20,
+        Math.max(...lines.map(t => Math.ceil(ctx.measureText(t).width))) + pad * 2 + 40
+      );
+      const h = pad * 2 + 14 * lines.length + 6;
+      ctx.fillStyle = 'rgba(0,0,0,.65)';
+      ctx.fillRect(10, 10, w, h);
+      ctx.fillStyle = '#cbd5e1';
+      let y = 10 + pad + 10;
+      for (const t of lines) { ctx.fillText(t, 10 + pad, y); y += 14; }
+
+      // mini-aperçu 32×32
+      if (playerSprite) {
+        (ctx as any).imageSmoothingEnabled = false;
+        ctx.drawImage(playerSprite, w - 36, 14, 32, 32);
+      }
     }
 
     // Rendu
@@ -361,7 +385,8 @@ export default function MiniGame({
       ctx.font = '18px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
       ctx.fillText('❤'.repeat(hp), 16, 52);
 
-      drawSpriteStatus();
+      // HUD debug sprite
+      drawSpriteDebugHUD();
 
       // overlays fin/départ
       if (startCountdown > 0) {
