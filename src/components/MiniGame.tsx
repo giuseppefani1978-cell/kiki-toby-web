@@ -8,7 +8,6 @@ type Props = {
   title?: string;
   onDone: (res: Result) => void;
 
-  // commandes externes (depuis l’overlay)
   moveLeft?: boolean;
   moveRight?: boolean;
   /** incrémenté à chaque appui Saut (edge trigger) */
@@ -18,7 +17,9 @@ type Props = {
   enableTouchJump?: boolean;
 };
 
-type Obstacle    = { x: number; y: number; w: number; h: number; vx: number; type: 'rat' | 'poop' };
+// --- gameplay entities
+type ObstacleType = 'rat' | 'pigeon' | 'poop';
+type Obstacle    = { x: number; y: number; w: number; h: number; vx: number; type: ObstacleType };
 type Collectible = { x: number; y: number; r: number; vx: number };
 
 // ---- utils
@@ -27,7 +28,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     const img = new Image();
     img.decoding = 'async';
     img.onload = () => resolve(img);
-    img.onerror = (e) => reject(new Error(`onerror for ${src}`));
+    img.onerror = reject;
     img.src = src;
   });
 }
@@ -44,11 +45,9 @@ export default function MiniGame({
   const hostRef = useRef<HTMLDivElement>(null);
   const cvsRef  = useRef<HTMLCanvasElement | null>(null);
 
-  // garder la dernière version de onDone sans relancer l’effet principal
   const onDoneRef = useRef(onDone);
   useEffect(() => { onDoneRef.current = onDone; }, [onDone]);
 
-  // commandes externes visibles dans la boucle
   const controlsRef   = useRef({ left: !!moveLeft, right: !!moveRight, jumpTick: jumpTick ?? 0 });
   const wantJumpRef   = useRef(false);
   const invulnBumpRef = useRef(0);
@@ -65,7 +64,6 @@ export default function MiniGame({
   }, [moveLeft, moveRight, jumpTick]);
 
   useEffect(() => {
-    // ---------- run once ----------
     const host = hostRef.current;
     if (!host) return;
 
@@ -114,65 +112,24 @@ export default function MiniGame({
     ).catch(() => { /* ignore */ });
     let bgScrollX = 0;
 
-    // ---------- SPRITES: diagnostic complet ----------
-    type SpriteDebug = {
-      receivedProp: 'kiki' | 'toby';
-      preferred: 'kiki' | 'toby';
-      preferredURL: string;
-      preferredError?: string;
-      fellBackToKiki: boolean;
-      fallbackURL?: string;
-      fallbackError?: string;
-      loadedName?: 'kiki' | 'toby';
-      loadedSize?: string;
-    };
+    // --- SPRITES
+    const spriteURL =
+      character === 'toby'
+        ? `${base}img/sprites/toby.PNG`
+        : `${base}img/sprites/kiki.PNG`;
 
-    const spriteDbg: SpriteDebug = {
-      receivedProp: character,
-      preferred: character,
-      preferredURL: `${base}img/sprites/${character}.PNG`,
-      fellBackToKiki: false,
-    };
+    const enemyRatURL    = `${base}img/sprites/rat.png`;
+    const enemyPigeonURL = `${base}img/sprites/pigeon.png`;
 
     let playerSprite: HTMLImageElement | null = null;
-    let loadedName: 'kiki' | 'toby' | undefined;
-    let spriteHUDTimer = 360; // ~6s visible
+    let ratSprite: HTMLImageElement | null = null;
+    let pigeonSprite: HTMLImageElement | null = null;
 
-    // Try preferred (prop)
-    loadImage(spriteDbg.preferredURL)
-      .then(img => {
-        playerSprite = img;
-        loadedName = character;
-        spriteDbg.loadedName = loadedName;
-        spriteDbg.loadedSize = `${img.width}×${img.height}`;
-        (window as any).__kt_lastSpriteDebug = spriteDbg;
-        console.info('[MiniGame sprite]', spriteDbg);
-      })
-      .catch(async (err) => {
-        spriteDbg.preferredError = String(err?.message || err || 'unknown error');
+    loadImage(spriteURL).then(i => (playerSprite = i)).catch(()=>{});
+    loadImage(enemyRatURL).then(i => (ratSprite = i)).catch(()=>{});
+    loadImage(enemyPigeonURL).then(i => (pigeonSprite = i)).catch(()=>{});
 
-        // Fallback to Kiki if preferred failed
-        if (character !== 'kiki') {
-          spriteDbg.fellBackToKiki = true;
-          spriteDbg.fallbackURL = `${base}img/sprites/kiki.PNG`;
-          try {
-            const img2 = await loadImage(spriteDbg.fallbackURL);
-            playerSprite = img2;
-            loadedName = 'kiki';
-            spriteDbg.loadedName = loadedName;
-            spriteDbg.loadedSize = `${img2.width}×${img2.height}`;
-          } catch (err2) {
-            spriteDbg.fallbackError = String(err2?.message || err2 || 'unknown error');
-            playerSprite = null;
-            loadedName = undefined;
-          }
-        }
-
-        (window as any).__kt_lastSpriteDebug = spriteDbg;
-        console.warn('[MiniGame sprite]', spriteDbg);
-      });
-
-    // ---- gameplay constants
+    // Constantes gameplay
     const groundY     = Math.floor(CSS_H * 0.80);
     const gravity     = 1500;
     const jumpV       = 540;
@@ -180,10 +137,14 @@ export default function MiniGame({
     const frictionX   = 900;
     const maxVx       = 220;
     const worldSpeed  = 170;
+
     const DURATION    = 20;
-    const START_DELAY = 0.8;
+    const START_DELAY = 0.45;   // ⬅️ plus court qu’avant
     const MAX_HP      = 3;
     const HIT_IFRAMES = 1.0;
+
+    // Visuel du joueur +20% sans changer la hitbox
+    const PLAYER_VIS_SCALE = 1.2;
 
     // état
     const player = { x: 80, y: groundY - 48, w: 48, h: 48, vx: 0, vy: 0, grounded: true };
@@ -200,7 +161,7 @@ export default function MiniGame({
     let hp = MAX_HP;
     let finishReason: 'rat' | 'time' | null = null;
 
-    // Clavier (desktop)
+    // Clavier
     const keys = { left: false, right: false };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'ArrowLeft')  keys.left = true;
@@ -218,7 +179,7 @@ export default function MiniGame({
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
-    // Tap-to-jump optionnel
+    // Tap-to-jump
     const onPointer = (e: PointerEvent) => {
       if (!enableTouchJump) return;
       e.preventDefault();
@@ -235,17 +196,24 @@ export default function MiniGame({
     function trySpawn(dt: number) {
       if (startCountdown > 0) return;
       spawnAcc += dt;
-      if (spawnAcc < 1.1) return;
+      if (spawnAcc < 0.6) return;   // ⬅️ spawn plus tôt
       spawnAcc = 0;
 
       const r = Math.random();
       if (r < 0.40) {
+        // rat au sol
         const w = 28, h = 22, x = CSS_W + 40, y = groundY - h;
         if (x > safeSpawnX() + 40) obs.push({ x, y, w, h, vx: -(worldSpeed + rnd(10, 50)), type: 'rat' });
-      } else if (r < 0.70) {
+      } else if (r < 0.65) {
+        // pigeon en vol (obstacle “aérien”)
+        const w = 30, h = 20, x = CSS_W + 40, y = groundY - rnd(120, 180);
+        if (x > safeSpawnX() + 40) obs.push({ x, y, w, h, vx: -(worldSpeed + rnd(30, 70)), type: 'pigeon' });
+      } else if (r < 0.85) {
+        // caca
         const w = 18, h = 10, x = CSS_W + 40, y = groundY - h;
         if (x > safeSpawnX() + 40) obs.push({ x, y, w, h, vx: -(worldSpeed + rnd(0, 30)), type: 'poop' });
       } else {
+        // pièce
         const r2 = 8, x = CSS_W + 40, y = groundY - rnd(60, 140);
         if (x > safeSpawnX() + 40) coins.push({ x, y, r: r2, vx: -(worldSpeed + rnd(10, 60)) });
       }
@@ -310,82 +278,68 @@ export default function MiniGame({
       }
     }
 
-    // Dessin du joueur
+    // Dessin du joueur (sprite + flip + ombre). Hitbox inchangée.
     function drawPlayer() {
-      // ombre au sol
+      // ombre
       ctx.fillStyle = 'rgba(0,0,0,.25)';
       ctx.beginPath();
       ctx.ellipse(player.x + player.w/2, groundY + 6, player.w*0.45, 6, 0, 0, Math.PI*2);
       ctx.fill();
 
-      // invuln “blink” doux
+      // invuln léger
       const prevAlpha = ctx.globalAlpha;
       if (invuln > 0) {
         const blink = (Math.floor(performance.now()/100) % 2) ? 0.55 : 1.0;
         ctx.globalAlpha = blink;
       }
 
+      const visW = Math.round(player.w * PLAYER_VIS_SCALE);
+      const visH = Math.round(player.h * PLAYER_VIS_SCALE);
+      const visX = Math.round(player.x + (player.w - visW) / 2);
+      const visY = Math.round(player.y + (player.h - visH));
+
       if (playerSprite) {
         const prevSmooth = (ctx as any).imageSmoothingEnabled;
         (ctx as any).imageSmoothingEnabled = false;
+
         ctx.save();
         if (facing === -1) {
-          ctx.translate(player.x + player.w, 0);
+          ctx.translate(visX + visW, 0);
           ctx.scale(-1, 1);
-          ctx.drawImage(playerSprite, 0, player.y, player.w, player.h);
+          ctx.drawImage(playerSprite, 0, visY, visW, visH);
         } else {
-          ctx.drawImage(playerSprite, player.x, player.y, player.w, player.h);
+          ctx.drawImage(playerSprite, visX, visY, visW, visH);
         }
         ctx.restore();
+
         (ctx as any).imageSmoothingEnabled = prevSmooth;
       } else {
-        // fallback carré tant que le sprite n'est pas chargé
+        // fallback rectangle
         const bodyColor = character === 'kiki' ? '#FFB84D' : '#5E93FF';
         ctx.fillStyle = bodyColor;
-        ctx.fillRect(player.x, player.y, player.w, player.h);
-        ctx.fillStyle = '#0b0b0b';
-        ctx.fillRect(player.x + 10, player.y + 10, 8, 8);
+        ctx.fillRect(visX, visY, visW, visH);
       }
 
       ctx.globalAlpha = prevAlpha;
     }
 
-    // HUD debug sprite en haut-gauche (auto-masque après quelques secondes si tout va bien)
-    function drawSpriteDebugHUD() {
-      if (spriteHUDTimer > 0) spriteHUDTimer--;
-
-      // si OK et plus de timer → on n'affiche pas
-      if (spriteHUDTimer <= 0 && spriteDbg.loadedName && !spriteDbg.preferredError) return;
-
-      const lines = [
-        `prop: ${spriteDbg.receivedProp}`,
-        `preferred: ${spriteDbg.preferred}`,
-        `preferredURL: ${spriteDbg.preferredURL}`,
-        spriteDbg.preferredError ? `preferredError: ${spriteDbg.preferredError}` : `preferredOK`,
-        `fallbackToKiki: ${spriteDbg.fellBackToKiki}`,
-        spriteDbg.fallbackURL ? `fallbackURL: ${spriteDbg.fallbackURL}` : '',
-        spriteDbg.fallbackError ? `fallbackError: ${spriteDbg.fallbackError}` : '',
-        `loaded: ${spriteDbg.loadedName ?? '—'} ${spriteDbg.loadedSize ? `(${spriteDbg.loadedSize})` : ''}`,
-      ].filter(Boolean) as string[];
-
-      const pad = 8;
-      ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-      const w = Math.min(
-        CSS_W - 20,
-        Math.max(...lines.map(t => Math.ceil(ctx.measureText(t).width))) + pad * 2 + 40
-      );
-      const h = pad * 2 + 14 * lines.length + 6;
-      ctx.fillStyle = 'rgba(0,0,0,.65)';
-      ctx.fillRect(10, 10, w, h);
-      ctx.fillStyle = '#cbd5e1';
-      let y = 10 + pad + 10;
-      for (const t of lines) { ctx.fillText(t, 10 + pad, y); y += 14; }
-
-      // mini-aperçu 32×32
-      if (playerSprite) {
+    // Dessin des obstacles (sprites rat & pigeon si dispo)
+    function drawObstacle(o: Obstacle) {
+      if (o.type === 'rat' && ratSprite) {
         (ctx as any).imageSmoothingEnabled = false;
-        ctx.drawImage(playerSprite, w - 36, 14, 32, 32);
+        ctx.drawImage(ratSprite, Math.round(o.x), Math.round(o.y), o.w, o.h);
+        return;
       }
+      if (o.type === 'pigeon' && pigeonSprite) {
+        (ctx as any).imageSmoothingEnabled = false;
+        // petit flottement
+        const bob = Math.sin(performance.now()/200 + o.x*0.05) * 2;
+        ctx.drawImage(pigeonSprite, Math.round(o.x), Math.round(o.y + bob), o.w, o.h);
+        return;
+      }
+      // fallback rectangles
+      ctx.fillStyle = o.type === 'rat' ? '#ef4444' : (o.type === 'poop' ? '#bdbdbd' : '#93c5fd');
+      ctx.fillRect(o.x, o.y, o.w, o.h);
     }
 
     // Rendu
@@ -397,10 +351,8 @@ export default function MiniGame({
       ctx.fillRect(0, groundY, CSS_W, CSS_H - groundY);
 
       // entités
-      for (const o of obs) {
-        ctx.fillStyle = o.type === 'rat' ? '#ef4444' : '#bdbdbd';
-        ctx.fillRect(o.x, o.y, o.w, o.h);
-      }
+      for (const o of obs) drawObstacle(o);
+
       for (const c of coins) {
         ctx.beginPath();
         ctx.fillStyle = character === 'kiki' ? '#ff9500' : '#007aff';
@@ -411,20 +363,18 @@ export default function MiniGame({
       // joueur
       drawPlayer();
 
-      // HUD basique
+      // HUD
       ctx.fillStyle = 'rgba(255,255,255,.94)';
       ctx.font = '20px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
-      ctx.fillText(`${title} — ${character.toUpperCase()}`, 16, 28);
+      ctx.fillText(title, 16, 28);
       ctx.font = '16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
       ctx.fillText(String(score), CSS_W - 160, 26);
       ctx.fillText(Math.max(0, DURATION - elapsed).toFixed(1), CSS_W - 80, 26);
+
       ctx.font = '18px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
       ctx.fillText('❤'.repeat(hp), 16, 52);
 
-      // HUD debug sprite
-      drawSpriteDebugHUD();
-
-      // overlays fin/départ
+      // overlays
       if (startCountdown > 0) {
         ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0, 0, CSS_W, CSS_H);
         ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
@@ -513,7 +463,7 @@ export default function MiniGame({
       if (startCountdown === 0) {
         for (const o of obs) {
           if (aabb(player, { x: o.x, y: o.y, w: o.w, h: o.h })) {
-            if (o.type === 'rat') {
+            if (o.type === 'rat' || o.type === 'pigeon') {
               if (invuln === 0) {
                 hp -= 1; invuln = HIT_IFRAMES; player.vx = -120;
                 if (hp <= 0) { finish('rat'); return; }
