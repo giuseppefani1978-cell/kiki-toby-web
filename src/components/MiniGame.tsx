@@ -114,22 +114,26 @@ export default function MiniGame({
     ).catch(() => { /* ignore */ });
     let bgScrollX = 0;
 
-   // --- SPRITE joueur (toujours dans /public/img/sprites/, casse .PNG)
-async function loadSprite(name: 'toby' | 'kiki') {
-  const base = import.meta.env.BASE_URL || '/';
-  const url = `${base}img/sprites/${name}.PNG`;
-  try {
-    const img = await loadImage(url);
-    console.info('[MiniGame] Sprite OK →', url, { w: img.width, h: img.height });
-    return img;
-  } catch (e) {
-    console.error('[MiniGame] Sprite introuvable →', url);
-    return null;
-  }
-}
+    // --- SPRITE joueur (toujours dans /public/img/sprites/, casse .PNG)
+    async function loadSprite(name: 'toby' | 'kiki') {
+      const base = import.meta.env.BASE_URL || '/';
+      const url = `${base}img/sprites/${name}.PNG`;
+      console.info('[MiniGame] trying sprite URL:', url);
+      try {
+        const img = await loadImage(url);
+        if (!img || !img.complete || img.naturalWidth === 0) {
+          throw new Error('decoded but empty image');
+        }
+        console.info('[MiniGame] sprite loaded:', url, { w: img.naturalWidth, h: img.naturalHeight });
+        return img;
+      } catch (e) {
+        console.error('[MiniGame] sprite FAILED:', url, e);
+        return null;
+      }
+    }
+    let playerSprite: HTMLImageElement | null = null;
+    loadSprite(character).then(img => { playerSprite = img; });
 
-let playerSprite: HTMLImageElement | null = null;
-loadSprite(character).then(img => { playerSprite = img; });
     // Constantes gameplay
     const groundY     = Math.floor(CSS_H * 0.80);
     const gravity     = 1500;
@@ -278,28 +282,29 @@ loadSprite(character).then(img => { playerSprite = img; });
       ctx.ellipse(player.x + player.w/2, groundY + 6, player.w*0.45, 6, 0, 0, Math.PI*2);
       ctx.fill();
 
-      // alpha doux pendant l'invuln (au lieu de "ne pas dessiner")
       const prevAlpha = ctx.globalAlpha;
+      const prevSmooth = (ctx as any).imageSmoothingEnabled;
+
+      // alpha doux pendant l'invuln
       if (invuln > 0) {
         const blink = (Math.floor(performance.now()/100) % 2) ? 0.55 : 1.0;
         ctx.globalAlpha = blink;
       }
 
-      if (playerSprite) {
-        const prevSmooth = (ctx as any).imageSmoothingEnabled;
-        (ctx as any).imageSmoothingEnabled = false; // sprite net
+      // ne dessine le sprite que s'il est vraiment prêt
+      const hasSprite = !!(playerSprite && playerSprite.complete && playerSprite.naturalWidth > 0);
 
+      if (hasSprite) {
+        (ctx as any).imageSmoothingEnabled = false; // sprite net
         ctx.save();
         if (facing === -1) {
           ctx.translate(player.x + player.w, 0);
           ctx.scale(-1, 1);
-          ctx.drawImage(playerSprite, 0, player.y, player.w, player.h);
+          ctx.drawImage(playerSprite as HTMLImageElement, 0, player.y, player.w, player.h);
         } else {
-          ctx.drawImage(playerSprite, player.x, player.y, player.w, player.h);
+          ctx.drawImage(playerSprite as HTMLImageElement, player.x, player.y, player.w, player.h);
         }
         ctx.restore();
-
-        (ctx as any).imageSmoothingEnabled = prevSmooth;
       } else {
         // fallback carré tant que le sprite n'est pas chargé
         ctx.fillStyle = bodyColor;
@@ -308,6 +313,7 @@ loadSprite(character).then(img => { playerSprite = img; });
         ctx.fillRect(player.x + 10, player.y + 10, 8, 8);
       }
 
+      (ctx as any).imageSmoothingEnabled = prevSmooth;
       ctx.globalAlpha = prevAlpha;
     }
 
