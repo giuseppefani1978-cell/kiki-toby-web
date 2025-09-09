@@ -18,11 +18,9 @@ type Props = {
 };
 
 // --- gameplay entities
-type EnemyKind = 'rat' | 'pigeon';
-type Enemy = { x: number; y: number; w: number; h: number; vx: number; kind: EnemyKind; alive: boolean };
-type Hazard = { x: number; y: number; w: number; h: number; vx: number; kind: 'poop' };
-type CollectibleKind = 'fish' | 'bone';
-type Collectible = { x: number; y: number; w: number; h: number; vx: number; kind: CollectibleKind };
+type ObstacleType = 'rat' | 'pigeon' | 'poop';
+type Obstacle    = { x: number; y: number; w: number; h: number; vx: number; type: ObstacleType };
+type Collectible = { x: number; y: number; r: number; vx: number };
 
 // ---- utils
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -115,25 +113,24 @@ export default function MiniGame({
     let bgScrollX = 0;
 
     // --- SPRITES
-    // Joueur (.PNG en MAJ)
-    const playerURL = `${base}img/sprites/${character}.PNG`;
-    // Ennemis / items (.png en min)
-    const ratURL       = `${base}img/sprites/rat.png`;
-    const pigeonURL    = `${base}img/sprites/pigeon.png`;
-    const fishURL      = `${base}img/sprites/fish.PNG`;
-    const boneURL      = `${base}img/sprites/bone.PNG`;
+    const spriteURL =
+      character === 'toby'
+        ? `${base}img/sprites/toby.PNG`
+        : `${base}img/sprites/kiki.PNG`;
+
+    const enemyRatURL    = `${base}img/sprites/rat.png`;
+    const enemyPigeonURL = `${base}img/sprites/pigeon.png`;
+    const poopURL        = `${base}img/sprites/poop.PNG`; // ⬅️ MAJUSCULE demandé
 
     let playerSprite: HTMLImageElement | null = null;
     let ratSprite: HTMLImageElement | null = null;
     let pigeonSprite: HTMLImageElement | null = null;
-    let fishSprite: HTMLImageElement | null = null;
-    let boneSprite: HTMLImageElement | null = null;
+    let poopSprite: HTMLImageElement | null = null;
 
-    loadImage(playerURL).then(i => (playerSprite = i)).catch(()=>{});
-    loadImage(ratURL).then(i => (ratSprite = i)).catch(()=>{});
-    loadImage(pigeonURL).then(i => (pigeonSprite = i)).catch(()=>{});
-    loadImage(fishURL).then(i => (fishSprite = i)).catch(()=>{});
-    loadImage(boneURL).then(i => (boneSprite = i)).catch(()=>{});
+    loadImage(spriteURL).then(i => (playerSprite = i)).catch(()=>{});
+    loadImage(enemyRatURL).then(i => (ratSprite = i)).catch(()=>{});
+    loadImage(enemyPigeonURL).then(i => (pigeonSprite = i)).catch(()=>{});
+    loadImage(poopURL).then(i => (poopSprite = i)).catch(()=>{});
 
     // Constantes gameplay
     const groundY     = Math.floor(CSS_H * 0.80);
@@ -154,10 +151,8 @@ export default function MiniGame({
 
     // état
     const player = { x: 80, y: groundY - 48, w: 48, h: 48, vx: 0, vy: 0, grounded: true };
-    let prevY = player.y;
-    const enemies: Enemy[] = [];
-    const hazards: Hazard[] = [];
-    const items: Collectible[] = [];
+    const obs: Obstacle[] = [];
+    const coins: Collectible[] = [];
     let facing: 1 | -1 = 1;
 
     let score = 0;
@@ -204,35 +199,42 @@ export default function MiniGame({
     function trySpawn(dt: number) {
       if (startCountdown > 0) return;
       spawnAcc += dt;
-      if (spawnAcc < 0.6) return; // spawn plus tôt
+      if (spawnAcc < 0.6) return;   // spawn plus tôt
       spawnAcc = 0;
 
-      // --- SPAWN RATES (faciles à ajuster)
-      // 0.45 rat, 0.20 pigeon, 0.15 poop, 0.20 item
       const r = Math.random();
-      if (r < 0.45) {
-        const w = 32, h = 24, x = CSS_W + 40, y = groundY - h;
-        if (x > safeSpawnX() + 40) enemies.push({ x, y, w, h, vx: -(worldSpeed + rnd(10, 50)), kind: 'rat', alive: true });
+      if (r < 0.40) {
+        // rat au sol
+        const w = 28, h = 22, x = CSS_W + 40, y = groundY - h;
+        if (x > safeSpawnX() + 40) obs.push({ x, y, w, h, vx: -(worldSpeed + rnd(10, 50)), type: 'rat' });
       } else if (r < 0.65) {
-        const w = 34, h = 22, x = CSS_W + 40, y = groundY - rnd(120, 180);
-        if (x > safeSpawnX() + 40) enemies.push({ x, y, w, h, vx: -(worldSpeed + rnd(30, 70)), kind: 'pigeon', alive: true });
-      } else if (r < 0.80) {
+        // pigeon en vol (obstacle “aérien”)
+        const w = 30, h = 20, x = CSS_W + 40, y = groundY - rnd(120, 180);
+        if (x > safeSpawnX() + 40) obs.push({ x, y, w, h, vx: -(worldSpeed + rnd(30, 70)), type: 'pigeon' });
+      } else if (r < 0.85) {
+        // poop
         const w = 18, h = 10, x = CSS_W + 40, y = groundY - h;
-        if (x > safeSpawnX() + 40) hazards.push({ x, y, w, h, vx: -(worldSpeed + rnd(0, 30)), kind: 'poop' });
+        if (x > safeSpawnX() + 40) obs.push({ x, y, w, h, vx: -(worldSpeed + rnd(0, 30)), type: 'poop' });
       } else {
-        const kind: CollectibleKind = Math.random() < 0.5 ? 'fish' : 'bone';
-        const w = 22, h = 22, x = CSS_W + 40, y = groundY - rnd(60, 140);
-        if (x > safeSpawnX() + 40) items.push({ x, y, w, h, vx: -(worldSpeed + rnd(10, 60)), kind });
+        // pièce
+        const r2 = 8, x = CSS_W + 40, y = groundY - rnd(60, 140);
+        if (x > safeSpawnX() + 40) coins.push({ x, y, r: r2, vx: -(worldSpeed + rnd(10, 60)) });
       }
 
-      if (enemies.length > 16) enemies.splice(0, enemies.length - 16);
-      if (hazards.length > 8)  hazards.splice(0, hazards.length - 8);
-      if (items.length > 12)   items.splice(0, items.length - 12);
+      if (obs.length > 12)   obs.splice(0, obs.length - 12);
+      if (coins.length > 10) coins.splice(0, coins.length - 10);
     }
 
     // Collisions
     const aabb = (a:{x:number;y:number;w:number;h:number}, b:{x:number;y:number;w:number;h:number}) =>
       a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+    const rectCircle = (px:number,py:number,pw:number,ph:number, cx:number,cy:number, r:number) => {
+      const rx = Math.max(px, Math.min(cx, px+pw));
+      const ry = Math.max(py, Math.min(cy, py+ph));
+      const dx = cx - rx, dy = cy - ry;
+      return dx*dx + dy*dy < r*r;
+    };
 
     // Fond défilant
     function drawScrollingBackground() {
@@ -324,37 +326,41 @@ export default function MiniGame({
       ctx.globalAlpha = prevAlpha;
     }
 
-    // Dessin des ennemis / hazards / collectibles
-    function drawEnemy(e: Enemy) {
-      if (!e.alive) return;
-      if (e.kind === 'rat' && ratSprite) {
+    // Dessin des obstacles (sprites rat, pigeon, poop si dispo)
+    function drawObstacle(o: Obstacle) {
+      // on dessine d'abord les sprites connus
+      if (o.type === 'rat' && ratSprite) {
+        const prev = (ctx as any).imageSmoothingEnabled;
         (ctx as any).imageSmoothingEnabled = false;
-        ctx.drawImage(ratSprite, Math.round(e.x), Math.round(e.y), e.w, e.h);
-      } else if (e.kind === 'pigeon' && pigeonSprite) {
+        ctx.drawImage(ratSprite, Math.round(o.x), Math.round(o.y), o.w, o.h);
+        (ctx as any).imageSmoothingEnabled = prev;
+        return;
+      }
+      if (o.type === 'pigeon' && pigeonSprite) {
+        const prev = (ctx as any).imageSmoothingEnabled;
         (ctx as any).imageSmoothingEnabled = false;
-        const bob = Math.sin(performance.now()/200 + e.x*0.05) * 2;
-        ctx.drawImage(pigeonSprite, Math.round(e.x), Math.round(e.y + bob), e.w, e.h);
-      } else {
-        ctx.fillStyle = e.kind === 'rat' ? '#ef4444' : '#93c5fd';
-        ctx.fillRect(e.x, e.y, e.w, e.h);
+        const bob = Math.sin(performance.now()/200 + o.x*0.05) * 2;
+        ctx.drawImage(pigeonSprite, Math.round(o.x), Math.round(o.y + bob), o.w, o.h);
+        (ctx as any).imageSmoothingEnabled = prev;
+        return;
       }
-    }
-    function drawHazard(h: Hazard) {
-      ctx.fillStyle = '#bdbdbd';
-      ctx.fillRect(h.x, h.y, h.w, h.h);
-    }
-    function drawItem(it: Collectible) {
-      (ctx as any).imageSmoothingEnabled = false;
-      const cx = Math.round(it.x);
-      const cy = Math.round(it.y);
-      if (it.kind === 'fish' && fishSprite) {
-        ctx.drawImage(fishSprite, cx, cy, it.w, it.h);
-      } else if (it.kind === 'bone' && boneSprite) {
-        ctx.drawImage(boneSprite, cx, cy, it.w, it.h);
-      } else {
-        ctx.fillStyle = it.kind === 'fish' ? '#ffda6a' : '#e5e7eb';
-        ctx.beginPath(); ctx.arc(cx + it.w/2, cy + it.h/2, Math.min(it.w,it.h)/2, 0, Math.PI*2); ctx.fill();
+      if (o.type === 'poop' && poopSprite) {
+        const prev = (ctx as any).imageSmoothingEnabled;
+        (ctx as any).imageSmoothingEnabled = false;
+        ctx.drawImage(poopSprite, Math.round(o.x), Math.round(o.y), o.w, o.h);
+        (ctx as any).imageSmoothingEnabled = prev;
+        return;
       }
+
+      // sinon fallback rectangles colorés
+      if (o.type === 'poop') {
+        ctx.fillStyle = '#8B4513'; // marron lisible
+      } else if (o.type === 'rat') {
+        ctx.fillStyle = '#ef4444';
+      } else {
+        ctx.fillStyle = '#93c5fd';
+      }
+      ctx.fillRect(o.x, o.y, o.w, o.h);
     }
 
     // Rendu
@@ -366,9 +372,14 @@ export default function MiniGame({
       ctx.fillRect(0, groundY, CSS_W, CSS_H - groundY);
 
       // entités
-      for (const e of enemies) drawEnemy(e);
-      for (const h of hazards) drawHazard(h);
-      for (const it of items) drawItem(it);
+      for (const o of obs) drawObstacle(o);
+
+      for (const c of coins) {
+        ctx.beginPath();
+        ctx.fillStyle = character === 'kiki' ? '#ff9500' : '#007aff';
+        ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       // joueur
       drawPlayer();
@@ -417,7 +428,6 @@ export default function MiniGame({
     }
 
     function stepOnce() {
-      // timers invuln / start
       if (startCountdown > 0) startCountdown = Math.max(0, startCountdown - STEP);
       if (invulnBumpRef.current > 0) { invuln += invulnBumpRef.current; invulnBumpRef.current = 0; }
       if (invuln > 0) invuln = Math.max(0, invuln - STEP);
@@ -433,7 +443,6 @@ export default function MiniGame({
       wantJumpRef.current = false;
 
       // vertical
-      prevY = player.y;
       player.vy += gravity * STEP;
       player.y  += player.vy * STEP;
       if (player.y >= groundY - player.h) {
@@ -468,60 +477,32 @@ export default function MiniGame({
       bgScrollX += (worldSpeed * slow) * STEP;
 
       // monde
-      for (const e of enemies) e.x += e.vx * STEP;
-      for (const h of hazards) h.x += h.vx * STEP;
-      for (const it of items) it.x += it.vx * STEP;
+      for (const o of obs)   o.x += o.vx * STEP;
+      for (const c of coins) c.x += c.vx * STEP;
 
       // collisions
       if (startCountdown === 0) {
-        // Ennemis (stomp)
-        for (const e of enemies) {
-          if (!e.alive) continue;
-          if (aabb(player, e)) {
-            const falling = player.vy > 0;
-            const wasAbove = (prevY + player.h) <= (e.y + 6); // marge tolérante
-            if (falling && wasAbove) {
-              // STOMP ✅
-              e.alive = false;
-              score += 2;
-              player.vy = -jumpV * 0.55; // petit rebond
-              // petit boost d’invuln contre un enchaînement immédiat
-              invulnBumpRef.current = Math.max(invulnBumpRef.current, 0.15);
-            } else if (invuln === 0) {
-              // DÉGÂTS
-              hp -= 1;
-              invuln = HIT_IFRAMES;
-              player.vx = -120; // knockback léger
-              if (hp <= 0) { finish('rat'); return; }
+        for (const o of obs) {
+          if (aabb(player, { x: o.x, y: o.y, w: o.w, h: o.h })) {
+            if (o.type === 'rat' || o.type === 'pigeon') {
+              if (invuln === 0) {
+                hp -= 1; invuln = HIT_IFRAMES; player.vx = -120;
+                if (hp <= 0) { finish('rat'); return; }
+              }
+            } else {
+              slow = 0.55; setTimeout(() => (slow = 1), 650);
+              o.x = -9999;
             }
           }
         }
-
-        // Hazards (poop → ralentit)
-        for (const h of hazards) {
-          if (aabb(player, h)) {
-            slow = 0.55; setTimeout(() => (slow = 1), 650);
-            h.x = -9999;
-          }
-        }
+      }
+      for (const c of coins) {
+        if (rectCircle(player.x, player.y, player.w, player.h, c.x, c.y, c.r)) { score += 1; c.x = -9999; }
       }
 
-      // Collectibles
-      for (const it of items) {
-        const overlap =
-          player.x < it.x + it.w && player.x + player.w > it.x &&
-          player.y < it.y + it.h && player.y + player.h > it.y;
-        if (overlap) {
-          const matched = (character === 'kiki' && it.kind === 'fish') || (character === 'toby' && it.kind === 'bone');
-          score += matched ? 2 : 1; // bonus si “goût” assorti
-          it.x = -9999;
-        }
-      }
-
-      // purge off-screen / morts
-      while (enemies.length && (enemies[0].x < -100 || !enemies[0].alive)) enemies.shift();
-      while (hazards.length && hazards[0].x < -100) hazards.shift();
-      while (items.length && items[0].x < -80) items.shift();
+      // purge
+      while (obs.length && obs[0].x < -100)   obs.shift();
+      while (coins.length && coins[0].x < -80) coins.shift();
 
       // spawns
       trySpawn(STEP);
