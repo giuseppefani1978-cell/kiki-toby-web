@@ -5,8 +5,33 @@
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#0c2233",
+  "orientation": "portrait",
   "icons": [
-    { "src": "/kiki-toby-web/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/kiki-toby-web/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    {
+      "src": "/kiki-toby-web/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/kiki-toby-web/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/kiki-toby-web/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/kiki-toby-web/icons/apple-touch-icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "/kiki-toby-web/icons/icon-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png"
+    }
   ]
 }
