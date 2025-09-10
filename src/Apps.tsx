@@ -7,11 +7,15 @@ import QRScanner from './components/QRScanner';
 import DialogueOverlay from './components/DialogueOverlay';
 import AlbumPanel from './components/AlbumPanel';
 import MiniGameOverlay from './components/MiniGameOverlay';
+import Landing from './components/Landing';
 
 import { game, loadGame } from './store/game';
 import '../styles.css';
 
 export default function Apps() {
+  // Écran d’accueil
+  const [showLanding, setShowLanding] = useState(true);
+
   // --- UI state ---
   const [showScan, setShowScan] = useState(false);
   const [showAlbum, setShowAlbum] = useState(false);
@@ -36,15 +40,11 @@ export default function Apps() {
     return () => window.removeEventListener('kt-game-update', onUpd as any);
   }, []);
 
-  // Empêche le scroll/zoom de la page quand un overlay plein écran est ouvert (iOS-friendly)
+  // Empêche le scroll/zoom quand un overlay plein écran est ouvert (iOS-friendly)
   useEffect(() => {
     const body = document.body;
     body.classList.toggle('modal-open', hasAnyOverlay);
-
-    // bloque les gestes tactiles du fond (notamment iOS)
-    const prevent = (e: TouchEvent) => {
-      if (hasAnyOverlay) e.preventDefault();
-    };
+    const prevent = (e: TouchEvent) => { if (hasAnyOverlay) e.preventDefault(); };
     document.addEventListener('touchmove', prevent, { passive: false });
     return () => {
       body.classList.remove('modal-open');
@@ -66,26 +66,15 @@ export default function Apps() {
   const scannerOverlay = useMemo(() => {
     if (!showScan) return null;
     return createPortal(
-      <div
-        className="overlay"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Scanner un QR partenaire"
-        onClick={(e) => {
-          // évite de fermer si on clique dans la zone sombre (on ferme uniquement via le bouton ✕)
-          e.stopPropagation();
-        }}
-      >
+      <div className="overlay" role="dialog" aria-modal="true" aria-label="Scanner un QR partenaire" onClick={(e) => e.stopPropagation()}>
         <div className="overlay-card" onClick={(e) => e.stopPropagation()}>
           <div className="overlay-head">
             <b>Scanner un QR partenaire</b>
             <button type="button" onClick={() => setShowScan(false)} aria-label="Fermer">✕</button>
           </div>
 
-          {/* Le QRScanner gère la permission et appelle onVisit au succès */}
           <QRScanner
             onVisit={({ partnerId }) => {
-              // On garde l’overlay visible jusqu’au callback, puis on le ferme proprement
               setShowScan(false);
               setToast(`Visite validée chez ${partnerId} — récompense débloquée !`);
               window.setTimeout(() => setToast(null), 3000);
@@ -101,10 +90,7 @@ export default function Apps() {
 
   const albumOverlay = useMemo(() => {
     if (!showAlbum) return null;
-    return createPortal(
-      <AlbumPanel onClose={() => setShowAlbum(false)} />,
-      document.body
-    );
+    return createPortal(<AlbumPanel onClose={() => setShowAlbum(false)} />, document.body);
   }, [showAlbum]);
 
   const gameOverlay = useMemo(() => {
@@ -124,40 +110,43 @@ export default function Apps() {
     );
   }, [showGame]);
 
+  // --- Landing d’abord ---
+  if (showLanding) {
+    return <Landing onStart={() => setShowLanding(false)} />;
+  }
+
+  // --- App “carte + overlays” ensuite ---
   return (
     <div className="safe" style={{ position: 'relative' }} aria-hidden={hasAnyOverlay}>
       <h2 style={{ margin: '8px 12px' }}>Kiki & Toby – Promenades parisiennes</h2>
 
       <MapView
-  bottomSpace={160}
-  onFocus={setFocus}
-  overlay={
-    focus ? (
-      <DialogueOverlay
-        poi={focus}
-        onClose={(picked?: 'kiki' | 'toby') => {
-          // on capture le poi courant avant de le nettoyer
-          const poi = focus;
-          setFocus(null);
+        bottomSpace={160}
+        onFocus={setFocus}
+        overlay={
+          focus ? (
+            <DialogueOverlay
+              poi={focus}
+              onClose={(picked?: 'kiki' | 'toby') => {
+                const poi = focus;
+                setFocus(null);
+                setToast('Choix enregistré ✅');
+                window.setTimeout(() => setToast(null), 2000);
 
-          setToast('Choix enregistré ✅');
-          window.setTimeout(() => setToast(null), 2000);
-
-          // Si on est sur un Panthéon → on enchaîne sur le mini-jeu
-          if (poi && poi.title.toLowerCase().includes('panthéon')) {
-            // léger délai pour laisser l’overlay se fermer proprement
-            window.setTimeout(() => {
-              setShowGame({
-                character: picked || 'kiki',       // 'kiki' par défaut si non fourni
-                title: `${poi.title} — Run`,
-              });
-            }, 120);
-          }
-        }}
+                if (poi && poi.title.toLowerCase().includes('panthéon')) {
+                  window.setTimeout(() => {
+                    setShowGame({
+                      character: picked || 'kiki',
+                      title: `${poi.title} — Run`,
+                    });
+                  }, 120);
+                }
+              }}
+            />
+          ) : null
+        }
       />
-    ) : null
-  }
-/>
+
       {/* Barre d’actions */}
       <div className="panel" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <button type="button" className="primary" onClick={(e) => { e.currentTarget.blur(); setShowScan(true); }}>
