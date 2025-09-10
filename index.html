@@ -5,19 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Kiki & Toby – Promenades parisiennes</title>
 
-    <!-- CSS global (chargé côté HTML pour éviter les soucis de résolution) -->
+    <!-- CSS global -->
     <link rel="stylesheet" href="/kiki-toby-web/styles.css" />
 
-    <!-- PWA / iOS -->
+    <!-- PWA / Manifest -->
     <link rel="manifest" href="/kiki-toby-web/manifest.webmanifest" />
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black">
-    <link rel="apple-touch-icon" href="/kiki-toby-web/icons/icon-192.png">
+    <meta name="theme-color" content="#0c2233" />
+
+    <!-- iOS / iPadOS -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Kiki&Toby" />
+    <link rel="apple-touch-icon" href="/kiki-toby-web/icons/apple-touch-icon-180.png" />
   </head>
   <body>
     <div id="root"></div>
 
     <script type="module" src="/src/main.tsx"></script>
-    
   </body>
 </html>
